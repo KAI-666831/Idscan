@@ -26,6 +26,9 @@
   .seg button.on { background:var(--accent); color:#fff; }
   .field { margin:10px 0; }
   .hide { display:none !important; }
+  #fieldsCard { display:flex; flex-direction:column; }
+  #fieldsCard > :not(.field) { order:100; }
+  #fieldsCard > button { margin-top:8px; }
   .field label { font-size:13px; color:var(--muted); display:flex; justify-content:space-between; }
   .field input { width:100%; font-size:18px; padding:10px; border-radius:10px; border:1px solid #ccc;
          background:transparent; color:var(--fg); margin-top:4px; }
@@ -101,7 +104,7 @@
   <progress id="prog" value="0" max="1" style="display:none"></progress>
 </div>
 
-<div class="card">
+<div class="card" id="fieldsCard">
   <div class="field" data-f="name"><label><span class="lb">姓名</span></label><input id="name" autocomplete="off"></div>
   <div class="field" data-f="nameEn"><label><span class="lb">英文姓名</span></label><input id="nameEn" autocomplete="off" autocapitalize="characters"></div>
   <div class="field" data-f="birth"><label><span class="lb">出生日期</span><span id="birthAd"></span></label><input id="birth" autocomplete="off"></div>
@@ -188,23 +191,29 @@ const TYPES = {
   id:       { label:'身分證', ratio:CARD, scan:'📷 掃描身分證正面', hint:'把身分證正面對準綠框，填滿框框、避開反光', date:'roc',
               f:{ name:'姓名', birth:'出生年月日（民國）', idno:'身分證字號' } },
   arc:      { label:'居留證', ratio:CARD, scan:'📷 掃描居留證正面', hint:'把居留證正面對準綠框，避開雷射貼紙反光', date:'ad',
-              f:{ nameEn:'英文姓名', name:'中文姓名', birth:'出生日期（西元）', idno:'統一證號', ppno:'護照號碼', nat:'國籍' } },
+              f:{ nameEn:'英文姓名', ppno:'護照號碼', birth:'出生日期（西元）', nat:'國籍', idno:'統一證號', name:'中文姓名' } },
   passport: { label:'護照',   ratio:BOOK, scan:'📷 掃描護照資料頁', hint:'對準有照片的那一頁，最下面兩行英數字要拍進去', date:'ad',
-              f:{ nameEn:'英文姓名', name:'中文姓名', birth:'出生日期（西元）', ppno:'護照號碼', nat:'國籍', idno:'身分證字號（台灣護照）' } },
+              f:{ nameEn:'英文姓名', ppno:'護照號碼', birth:'出生日期（西元）', nat:'國籍', name:'中文姓名', idno:'身分證字號（台灣護照）' } },
   seaman:   { label:'船員證', ratio:BOOK, scan:'📷 掃描船員服務手冊', hint:'對準有照片、姓名、生日的那一頁', date:'roc',
               f:{ name:'姓名', nameEn:'英文姓名', birth:'出生日期（民國）', idno:'身分證字號', docno:'手冊號碼' } },
   nhi:      { label:'健保卡', ratio:CARD, scan:'📷 掃描健保卡正面', hint:'把健保卡正面對準綠框', date:'roc',
               f:{ name:'姓名', nameEn:'英文姓名', birth:'出生日期（民國）', idno:'身分證／居留證號' } }
 };
 const ALL_F = ['name','nameEn','birth','idno','ppno','nat','docno'];
+// 護照、居留證以英文姓名＋護照號碼為主；其他證件以中文姓名＋身分證號為主
+const EN_FIRST = t => t === 'passport' || t === 'arc';
+const primaryName = r => (EN_FIRST(r.type) ? (r.nameEn || r.name) : (r.name || r.nameEn)) || '';
+const primaryNo   = r => (EN_FIRST(r.type) ? (r.ppno || r.idno) : (r.idno || r.ppno)) || '';
 let docType = 'id';
 function setType(t) {
   docType = t;
   document.querySelectorAll('#types button').forEach(x => x.classList.toggle('on', x.dataset.t === t));
   $('scanBtn').textContent = TYPES[t].scan;
   $('wholeBtn').classList.toggle('hide', t === 'id');
+  const order = Object.keys(TYPES[t].f);
   document.querySelectorAll('[data-f]').forEach(e => {
     const lb = TYPES[t].f[e.dataset.f];
+    e.style.order = lb ? order.indexOf(e.dataset.f) : 99;
     e.classList.toggle('hide', !lb);
     if (lb) e.querySelector('.lb').textContent = lb;
   });
@@ -546,7 +555,7 @@ function render() {
   const a = load();
   $('count').textContent = a.length;
   $('list').tBodies[0].innerHTML = a.map((r,i) =>
-    `<tr><td>${esc(TYPES[r.type||'id']?.label||'')}</td><td>${esc(r.name||r.nameEn||'')}</td><td>${esc(r.birth)}</td><td>${esc(r.idno||r.ppno||'')}</td><td>${r.confirmed ? '<span class="ck">✓</span>' : ''}</td><td><a href="#" onclick="del(${i});return false">刪</a></td></tr>`).join('');
+    `<tr><td>${esc(TYPES[r.type||'id']?.label||'')}</td><td>${esc(primaryName(r))}</td><td>${esc(r.birth)}</td><td>${esc(primaryNo(r))}</td><td>${r.confirmed ? '<span class="ck">✓</span>' : ''}</td><td><a href="#" onclick="del(${i});return false">刪</a></td></tr>`).join('');
 }
 // ---------- 給客人確認 ----------
 const EN_LABEL = { name:'Name', nameEn:'Name', birth:'Date of birth', idno:'ID No.', ppno:'Passport No.', nat:'Nationality', docno:'Book No.' };
@@ -607,8 +616,8 @@ function saveRecord() {
 function del(i) { const a = load(); a.splice(i,1); store(a); render(); }
 function clearAll() { if (confirm('確定刪除全部資料？')) { store([]); render(); } }
 function exportCsv() {
-  const rows = [['類別','姓名','英文姓名','出生日期(證件上)','出生日期(西元)','身分證/統一證號','護照號碼','國籍','手冊號碼','客人確認','時間'],
-    ...load().map(r => [TYPES[r.type||'id']?.label||'', r.name||'', r.nameEn||'', r.birth||'',
+  const rows = [['類別','姓名(主要)','證號(主要)','中文姓名','英文姓名','出生日期(證件上)','出生日期(西元)','身分證/統一證號','護照號碼','國籍','手冊號碼','客人確認','時間'],
+    ...load().map(r => [TYPES[r.type||'id']?.label||'', primaryName(r), primaryNo(r), r.name||'', r.nameEn||'', r.birth||'',
       r.birthAd || (r.type==='id'||!r.type ? rocToAd(r.birth||'').replace('西元 ','') : r.birth||''),
       r.idno||'', r.ppno||'', r.nat||'', r.docno||'', r.confirmed ? '是' : '', r.t])];
   const csv = '﻿' + rows.map(r => r.map(x => `"${String(x).replace(/"/g,'""')}"`).join(',')).join('\n');

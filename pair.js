@@ -66,9 +66,9 @@ function opState() {
     : `<span class="ok">● 副機有回應</span>（${ago < 1 ? '剛剛' : ago + ' 分鐘前'}） <a href="#" onclick="pingDisplay();return false">測試連線</a>`;
   const late = [...pending.values()].filter(r => Date.now() - r.sentAt > 90000);
   if (late.length) el.innerHTML += '<br><span class="bad">副機超過 90 秒沒回應，請看一下副機畫面</span>';
-  if (pending.size) el.innerHTML += `<br>等待客人確認：${[...pending.values()].map(r => esc(r.name || r.nameEn || r.idno)).join('、')}`;
+  if (pending.size) el.innerHTML += `<br>等待客人確認：${[...pending.values()].map(r => esc(primaryName(r) || primaryNo(r))).join('、')}`;
   const fix = lsGet('idscan_fix');
-  if (fix) el.innerHTML += `<br><a href="#" onclick="fillRecord(lsGet('idscan_fix'));lsSet('idscan_fix',null);opState();return false">⚠ 載入 ${esc(fix.name || fix.nameEn || fix.idno)} 的資料來修改</a>`;
+  if (fix) el.innerHTML += `<br><a href="#" onclick="fillRecord(lsGet('idscan_fix'));lsSet('idscan_fix',null);opState();return false">⚠ 載入 ${esc(primaryName(fix) || primaryNo(fix))} 的資料來修改</a>`;
   $('pairBtn').textContent = '重新配對副機';
 }
 async function opStart() {
@@ -85,9 +85,9 @@ function opOnMsg(m) {
     pending.delete(m.data.id);
     if (m.data.ok) {
       storeRecord({ ...rec, confirmed:true, confirmedAt:new Date().toISOString() });
-      toast(`✓ ${rec.name || rec.nameEn || rec.idno} 已確認並儲存`);
+      toast(`✓ ${primaryName(rec) || primaryNo(rec)} 已確認並儲存`);
     } else {
-      toast(`✗ ${rec.name || rec.nameEn || rec.idno} 說資料有錯，已放回表單請修改`, true);
+      toast(`✗ ${primaryName(rec) || primaryNo(rec)} 說資料有錯，已放回表單請修改`, true);
       if (!hasData(collectRecord())) fillRecord(rec);
       else lsSet('idscan_fix', rec);
     }
