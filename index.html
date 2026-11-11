@@ -84,7 +84,7 @@
   <button class="sec" onclick="document.getElementById('pick').click()">從相簿選擇</button>
   <input id="pick" type="file" accept="image/*">
   <canvas id="cardView"></canvas>
-  <div id="status">第一次使用需連網下載辨識模型（約 30MB），之後可離線使用。</div>
+  <div id="status">準備中…</div>
   <progress id="prog" value="0" max="1" style="display:none"></progress>
 </div>
 
@@ -331,19 +331,44 @@ function useCrop() {
 }
 
 // ---------- OCR：PP-OCRv5 文字辨識模型（完全在手機上跑）----------
-let sess = null, dict = null;
-async function loadModel() {
-  if (sess) return;
+// 大檔案（模型、引擎）存在獨立的快取，app 更新時不會被清掉
+const MODEL_CACHE = 'idscan-models-v1';
+async function getAsset(path, label) {
+  const url = new URL(path, location.href).href;
+  let cache = null;
+  try { cache = await caches.open(MODEL_CACHE); } catch {}
+  const hit = cache && await cache.match(url);
+  if (hit) return hit.arrayBuffer();
+  // 沒有快取才下載，顯示進度
+  const res = await fetch(url, { cache:'no-store' });
+  if (!res.ok) throw new Error('下載失敗 ' + res.status + ' ' + path);
+  const total = +res.headers.get('content-length') || 0;
+  const reader = res.body.getReader(), parts = []; let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read(); if (done) break;
+    parts.push(value); got += value.length;
+    $('status').textContent = `第一次下載${label}… ${(got/1048576).toFixed(1)}${total ? ' / ' + (total/1048576).toFixed(1) : ''} MB（只需一次）`;
+    if (total) $('prog').value = got / total;
+  }
+  const blob = new Blob(parts);
+  if (cache) { try { await cache.put(url, new Response(blob, { headers:{ 'content-type':'application/octet-stream' } })); } catch {} }
+  return blob.arrayBuffer();
+}
+
+let sess = null, dict = null, loading = null;
+function loadModel() { return loading || (loading = _loadModel().catch(e => { loading = null; throw e; })); }
+async function _loadModel() {
   $('prog').style.display = 'block'; $('prog').removeAttribute('value');
-  $('status').textContent = '載入辨識模型…（第一次約 30MB，之後離線可用）';
-  ort.env.wasm.wasmPaths = new URL('ort/', location.href).href;
+  $('status').textContent = '準備辨識引擎…';
+  try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch {}
   ort.env.wasm.numThreads = 1;
-  const [txt, buf] = await Promise.all([
-    fetch('model/ppocrv5_dict.txt').then(r => r.text()),
-    fetch('model/ppocr_v5_mobile_rec.onnx').then(r => r.arrayBuffer())
-  ]);
+  ort.env.wasm.wasmPaths = new URL('ort/', location.href).href;
+  ort.env.wasm.wasmBinary = await getAsset('ort/ort-wasm-simd-threaded.wasm', '辨識引擎');
+  const txt = new TextDecoder().decode(await getAsset('model/ppocrv5_dict.txt', '字典'));
+  const buf = await getAsset('model/ppocr_v5_mobile_rec.onnx', '文字模型');
   dict = [''].concat(txt.split('\n').filter((l, i, a) => !(i === a.length - 1 && l === '')), [' ']);
   sess = await ort.InferenceSession.create(buf, { executionProviders: ['wasm'] });
+  $('prog').style.display = 'none';
 }
 
 // 從裁好的身分證圖切出一條文字列，縮放到高 48，送進模型，CTC 解碼
@@ -536,6 +561,8 @@ function exportCsv() {
 }
 setType('id');
 render();
+// 開 app 時先在背景載入模型，按掃描時就不用等
+setTimeout(() => loadModel().then(() => loadDet()).then(() => { $('status').textContent = '辨識引擎已就緒，可離線使用。'; }).catch(e => { $('status').textContent = '模型載入失敗：' + e.message; }), 300);
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script>

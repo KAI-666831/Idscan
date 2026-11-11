@@ -1,10 +1,11 @@
 // ===== 文字偵測（PP-OCRv5 det）+ 各類證件欄位解析 =====
 let detSess = null;
-async function loadDet() {
-  if (detSess) return;
-  const buf = await fetch('model/ppocr_v5_mobile_det.onnx').then(r => r.arrayBuffer());
+let detLoading = null;
+function loadDet() { return detLoading || (detLoading = (async () => {
+  await loadModel();
+  const buf = await getAsset('model/ppocr_v5_mobile_det.onnx', '偵測模型');
   detSess = await ort.InferenceSession.create(buf, { executionProviders: ['wasm'] });
-}
+})().catch(e => { detLoading = null; throw e; })); }
 
 // 找出圖上所有文字列的位置（DB 後處理：二值化 → 連通區塊 → 外擴）
 async function detectLines(img, limit = 960) {
