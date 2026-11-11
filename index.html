@@ -57,7 +57,7 @@
   <button class="sec" onclick="document.getElementById('pick').click()">從相簿選擇</button>
   <input id="pick" type="file" accept="image/*">
   <canvas id="cardView"></canvas>
-  <div id="status">第一次使用需連網下載辨識模型（約 20MB），之後可離線使用。</div>
+  <div id="status">第一次使用需連網下載辨識模型（約 30MB），之後可離線使用。</div>
   <progress id="prog" value="0" max="1" style="display:none"></progress>
 </div>
 
@@ -91,7 +91,7 @@
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="ort/ort.wasm.min.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const CARD_RATIO = 85.6 / 54;
@@ -200,48 +200,54 @@ function useCrop() {
   runOcr(c);
 }
 
-// ---------- OCR：固定版面 + 多個微調位置投票 ----------
-let chi = null, eng = null;
-async function workers() {
-  $('prog').style.display = 'block';
-  const logger = m => { if (m.progress != null) $('prog').value = m.progress;
-    if (m.status && m.status.includes('loading')) $('status').textContent = '載入辨識模型…（第一次較久）'; };
-  if (!chi) chi = await Tesseract.createWorker('chi_tra', 1, { logger });
-  if (!eng) eng = await Tesseract.createWorker('eng', 1, { logger });
+// ---------- OCR：PP-OCRv5 文字辨識模型（完全在手機上跑）----------
+let sess = null, dict = null;
+async function loadModel() {
+  if (sess) return;
+  $('prog').style.display = 'block'; $('prog').removeAttribute('value');
+  $('status').textContent = '載入辨識模型…（第一次約 30MB，之後離線可用）';
+  ort.env.wasm.wasmPaths = new URL('ort/', location.href).href;
+  ort.env.wasm.numThreads = 1;
+  const [txt, buf] = await Promise.all([
+    fetch('model/ppocrv5_dict.txt').then(r => r.text()),
+    fetch('model/ppocr_v5_mobile_rec.onnx').then(r => r.arrayBuffer())
+  ]);
+  dict = [''].concat(txt.split('\n').filter((l, i, a) => !(i === a.length - 1 && l === '')), [' ']);
+  sess = await ort.InferenceSession.create(buf, { executionProviders: ['wasm'] });
 }
 
-// 從裁好的身分證圖切出一塊，取綠色通道（紅字也會變深）並拉高對比
-function region(card, x0, y0, x1, y1, scale) {
+// 從裁好的身分證圖切出一條文字列，縮放到高 48，送進模型，CTC 解碼
+async function recRegion(card, x0, y0, x1, y1) {
   x0 = Math.max(0,x0); y0 = Math.max(0,y0); x1 = Math.min(1,x1); y1 = Math.min(1,y1);
-  const W = card.width, H = card.height;
-  const sw = (x1-x0)*W, sh = (y1-y0)*H;
-  const c = document.createElement('canvas');
-  c.width = Math.round(sw*scale); c.height = Math.round(sh*scale);
+  const W = card.width, H = card.height, sw = (x1-x0)*W, sh = (y1-y0)*H;
+  const h = 48, w = Math.max(16, Math.round(sw * h / sh));
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
   const ctx = c.getContext('2d');
-  ctx.drawImage(card, x0*W, y0*H, sw, sh, 0, 0, c.width, c.height);
-  const d = ctx.getImageData(0, 0, c.width, c.height), p = d.data;
-  for (let i=0;i<p.length;i+=4) {
-    const g = Math.max(0, Math.min(255, (p[i+1] - 150) * 2 + 150));
-    p[i] = p[i+1] = p[i+2] = g;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(card, x0*W, y0*H, sw, sh, 0, 0, w, h);
+  const px = ctx.getImageData(0, 0, w, h).data;
+  const f = new Float32Array(3*h*w), n = h*w;
+  for (let i = 0; i < n; i++) {
+    f[i]       = px[i*4]   / 127.5 - 1;
+    f[n + i]   = px[i*4+1] / 127.5 - 1;
+    f[2*n + i] = px[i*4+2] / 127.5 - 1;
   }
-  ctx.putImageData(d, 0, 0);
-  return c;
+  const out = await sess.run({ [sess.inputNames[0]]: new ort.Tensor('float32', f, [1,3,h,w]) });
+  const o = out[sess.outputNames[0]], [, T, C] = o.dims, d = o.data;
+  let s = '', prev = -1;
+  for (let t = 0; t < T; t++) {
+    let bi = 0, bv = -Infinity;
+    for (let k = 0; k < C; k++) { const v = d[t*C + k]; if (v > bv) { bv = v; bi = k; } }
+    if (bi !== prev && bi !== 0) s += dict[bi] || '';
+    prev = bi;
+  }
+  return s.replace(/\s/g, '');
 }
 
-const OFFSETS = [[0,0],[0,-0.015],[0,0.015],[-0.03,0],[0.03,0],[0,-0.03],[0,0.03],[-0.03,-0.015],[0.03,0.015],[-0.03,0.015],[0.03,-0.015],[0,0.045],[0,-0.045]];
-const DIGIT_FIX = { O:'0', D:'0', Q:'0', I:'1', L:'1', S:'5', B:'8', Z:'2', G:'6', T:'7' };
-
-function voteId(cands) {
-  // 逐位多數決
-  const pos = Array.from({length:10}, () => ({}));
-  for (const s of cands) for (let i=0;i<10;i++) pos[i][s[i]] = (pos[i][s[i]]||0) + 1;
-  const top = o => Object.entries(o).sort((a,b) => b[1]-a[1])[0]?.[0] || '';
-  return pos.map(top).join('');
-}
-function topVote(counter) {
-  const e = Object.entries(counter).sort((a,b) => b[1]-a[1]);
-  return e.length ? e[0] : null;
-}
+const OFFSETS = [[0,0],[0,-0.02],[0,0.02],[-0.02,0],[0.02,0],[0,-0.04],[0,0.04],[-0.02,-0.02],[0.02,0.02]];
+const TO_TRAD = { '黄':'黃','颖':'穎','华':'華','国':'國','伟':'偉','杰':'傑','俊':'俊','丽':'麗','婷':'婷','军':'軍','龙':'龍','刘':'劉','陈':'陳','张':'張','吴':'吳','郑':'鄭','许':'許','谢':'謝','罗':'羅','叶':'葉','苏':'蘇','庄':'莊','钟':'鍾','赖':'賴','杨':'楊','萧':'蕭','邓':'鄧','冯':'馮','韩':'韓','贺':'賀','卢':'盧','顾':'顧','汤':'湯' };
+const topVote = c => { const e = Object.entries(c).sort((a,b) => b[1]-a[1]); return e.length ? e[0] : null; };
+const add = (c, k) => c[k] = (c[k]||0) + 1;
 
 async function runOcr(card) {
   const view = $('cardView');
@@ -251,58 +257,36 @@ async function runOcr(card) {
   $('idCheck').textContent = ''; $('birthAd').textContent = '';
   const log = [];
   try {
-    await workers();
-    // 身分證字號（右下角紅字）
-    await eng.setParameters({ tessedit_pageseg_mode:'7', tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789' });
-    const idC = []; const idValid = {};
-    for (let k=0; k<OFFSETS.length; k++) {
-      const [dx,dy] = OFFSETS[k];
-      $('status').textContent = `辨識字號… ${k+1}/${OFFSETS.length}`;
-      const { data } = await eng.recognize(region(card, 0.64+dx, 0.84+dy, 0.995, 0.97+dy, 1.5));
-      const t = data.text.replace(/\s/g,''); log.push('ID: '+t);
-      const m = t.match(/[A-Z0-9]{10}/); if (!m) continue;
-      const s = m[0][0] + m[0].slice(1).replace(/[A-Z]/g, ch => DIGIT_FIX[ch] || ch);
-      idC.push(s);
-      if (validId(s)) { idValid[s] = (idValid[s]||0) + 1; if (idValid[s] >= 3) break; }
-    }
-    const bestValid = topVote(idValid);
-    $('idno').value = bestValid ? bestValid[0] : (idC.length ? voteId(idC) : '');
-    checkId();
-
-    // 姓名 + 出生日期（中文）
-    await chi.setParameters({ tessedit_pageseg_mode:'7' });
-    const names = {}, births = {};
-    for (let k=0; k<OFFSETS.length; k++) {
-      const [dx,dy] = OFFSETS[k];
-      $('status').textContent = `辨識姓名與生日… ${k+1}/${OFFSETS.length}`;
+    await loadModel();
+    $('prog').style.display = 'block';
+    const ids = {}, names = {}, births = {};
+    for (let k = 0; k < OFFSETS.length; k++) {
+      const [dx, dy] = OFFSETS[k];
+      $('status').textContent = `辨識中… ${k+1}/${OFFSETS.length}`; $('prog').value = (k+1)/OFFSETS.length;
+      if (!(topVote(ids)?.[1] >= 3)) {
+        const t = (await recRegion(card, 0.62+dx, 0.82+dy, 1.0, 0.99+dy)).toUpperCase(); log.push('號: '+t);
+        for (const m of t.match(/[A-Z][0-9]{9}/g) || []) if (validId(m)) add(ids, m);
+      }
       if (!(topVote(names)?.[1] >= 3)) {
-        const { data } = await chi.recognize(region(card, 0.03+dx, 0.44+dy, 0.66+dx, 0.58+dy, 1));
-        const t = data.text.replace(/\s/g,''); log.push('名: '+t);
-        let m = t.match(/[一-鿿]{2,6}$/);
-        if (m) {
-          let s = m[0];
-          if (s.length > 3) s = s.replace(/^[一-鿿]?[姓名各]/, '');
-          if (s.length >= 2 && s.length <= 4) names[s] = (names[s]||0) + 1;
-        }
+        const t = await recRegion(card, 0.0+dx, 0.40+dy, 0.70+dx, 0.62+dy); log.push('名: '+t);
+        const m = t.match(/名([一-鿿]{2,4})/) || t.match(/([一-鿿]{2,4})$/);
+        if (m) add(names, [...m[1]].map(ch => TO_TRAD[ch] || ch).join(''));
       }
       if (!(topVote(births)?.[1] >= 3)) {
-        const { data } = await chi.recognize(region(card, 0.13+dx, 0.65+dy, 0.60+dx, 0.80+dy, 2));
-        const t = data.text.replace(/\s/g,''); log.push('生: '+t);
-        const m = t.match(/(\d{2,3})\D{0,2}(\d{1,2})月(\d{1,2})/);
-        const y = m ? Number(m[1]) : 0, mo = m ? Number(m[2]) : 0, d = m ? Number(m[3]) : 0;
-        if (m && y >= 10 && y <= 120 && mo >= 1 && mo <= 12 && d >= 1 && d <= 31) {
-          const s = `${y}/${String(mo).padStart(2,'0')}/${String(d).padStart(2,'0')}`;
-          births[s] = (births[s]||0) + 1;
-        }
+        const t = await recRegion(card, 0.10+dx, 0.62+dy, 0.68+dx, 0.82+dy); log.push('生: '+t);
+        const m = t.match(/(\d{2,3})年(\d{1,2})月(\d{1,2})日/);
+        if (m && +m[2] >= 1 && +m[2] <= 12 && +m[3] >= 1 && +m[3] <= 31)
+          add(births, `${+m[1]}/${m[2].padStart(2,'0')}/${m[3].padStart(2,'0')}`);
       }
-      if (topVote(names)?.[1] >= 3 && topVote(births)?.[1] >= 3) break;
+      if (k >= 2 && topVote(ids)?.[1] >= 3 && topVote(names)?.[1] >= 3 && topVote(births)?.[1] >= 3) break;
     }
+    $('idno').value = topVote(ids)?.[0] || ''; checkId();
     $('name').value = topVote(names)?.[0] || '';
     $('birth').value = topVote(births)?.[0] || '';
     $('birthAd').textContent = rocToAd($('birth').value);
     $('status').textContent = '完成，請核對後儲存。空白或有錯的欄位可直接修改。';
   } catch (e) {
-    $('status').textContent = '辨識失敗：' + e.message;
+    $('status').textContent = '辨識失敗：' + (e && e.message || e);
   }
   $('raw').textContent = log.join('\n');
   $('prog').style.display = 'none';
