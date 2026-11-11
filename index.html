@@ -37,6 +37,22 @@
   details { font-size:12px; color:var(--muted); margin-top:8px; }
   pre { white-space:pre-wrap; word-break:break-all; }
 
+  /* 客人確認畫面：白底大字 */
+  #confirm { position:fixed; inset:0; z-index:20; background:#fff; color:#111; display:none; overflow:auto;
+             padding:calc(env(safe-area-inset-top) + 16px) 18px calc(env(safe-area-inset-bottom) + 110px); }
+  .cf-title { font-size:24px; font-weight:700; text-align:center; margin-bottom:10px; }
+  .cf-title small { font-size:15px; color:#666; font-weight:400; }
+  #cfImg { width:100%; border-radius:10px; margin-bottom:8px; }
+  .cf-row { border-bottom:1px solid #ddd; padding:10px 2px; }
+  .cf-row .k { font-size:14px; color:#666; }
+  .cf-row .v { font-size:28px; font-weight:700; letter-spacing:1px; word-break:break-all; }
+  .cf-row .v small { font-size:16px; color:#666; font-weight:400; letter-spacing:0; }
+  .cf-btns { position:fixed; left:0; right:0; bottom:0; display:flex; gap:10px; background:#fff;
+             padding:12px 18px calc(env(safe-area-inset-bottom) + 12px); box-shadow:0 -2px 8px rgba(0,0,0,.08); }
+  .cf-btns button { flex:1; padding:18px 0; font-size:20px; }
+  .cf-yes { background:#16a34a; } .cf-no { background:#fff; color:#dc2626; border:2px solid #dc2626; }
+  .ck { color:#16a34a; font-weight:700; }
+
   /* 全螢幕取景 / 裁切畫面 */
   #overlay { position:fixed; inset:0; background:#000; z-index:10; display:none; }
   #overlay video, #overlay img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
@@ -81,15 +97,27 @@
   <div class="field" data-f="ppno"><label><span class="lb">護照號碼</span> <span id="ppCheck"></span></label><input id="ppno" autocomplete="off" autocapitalize="characters"></div>
   <div class="field" data-f="nat"><label><span class="lb">國籍</span></label><input id="nat" autocomplete="off"></div>
   <div class="field" data-f="docno"><label><span class="lb">手冊號碼</span></label><input id="docno" autocomplete="off" autocapitalize="characters"></div>
-  <button onclick="saveRecord()">儲存這筆</button>
+  <button onclick="openConfirm()">👤 給客人確認</button>
+  <button class="sec" onclick="saveRecord()">直接儲存（不確認）</button>
   <details><summary>辨識原文（除錯用）</summary><pre id="raw"></pre></details>
 </div>
 
 <div class="card">
   <b>已儲存 <span id="count">0</span> 筆</b>（只存在這支手機）
-  <table id="list"><thead><tr><th>類別</th><th>姓名</th><th>生日</th><th>號碼</th><th></th></tr></thead><tbody></tbody></table>
+  <table id="list"><thead><tr><th>類別</th><th>姓名</th><th>生日</th><th>號碼</th><th>確認</th><th></th></tr></thead><tbody></tbody></table>
   <button class="sec" onclick="exportCsv()">匯出 CSV</button>
   <button class="danger" onclick="clearAll()">全部刪除</button>
+</div>
+
+<!-- 給客人看的確認畫面 -->
+<div id="confirm">
+  <div class="cf-title">請確認您的資料<br><small>Please check your information</small></div>
+  <img id="cfImg" alt="">
+  <div id="cfRows"></div>
+  <div class="cf-btns">
+    <button class="cf-no" onclick="confirmNo()">✗ 有錯 Wrong</button>
+    <button class="cf-yes" onclick="confirmYes()">✓ 正確 Correct</button>
+  </div>
 </div>
 
 <div id="overlay">
@@ -450,10 +478,42 @@ function render() {
   const a = load();
   $('count').textContent = a.length;
   $('list').tBodies[0].innerHTML = a.map((r,i) =>
-    `<tr><td>${esc(TYPES[r.type||'id']?.label||'')}</td><td>${esc(r.name||r.nameEn||'')}</td><td>${esc(r.birth)}</td><td>${esc(r.idno||r.ppno||'')}</td><td><a href="#" onclick="del(${i});return false">刪</a></td></tr>`).join('');
+    `<tr><td>${esc(TYPES[r.type||'id']?.label||'')}</td><td>${esc(r.name||r.nameEn||'')}</td><td>${esc(r.birth)}</td><td>${esc(r.idno||r.ppno||'')}</td><td>${r.confirmed ? '<span class="ck">✓</span>' : ''}</td><td><a href="#" onclick="del(${i});return false">刪</a></td></tr>`).join('');
 }
-function saveRecord() {
-  const r = { type:docType, t:new Date().toISOString() };
+// ---------- 給客人確認 ----------
+const EN_LABEL = { name:'Name', nameEn:'Name', birth:'Date of birth', idno:'ID No.', ppno:'Passport No.', nat:'Nationality', docno:'Book No.' };
+const groupId = v => /^[A-Z0-9]{10}$/.test(v) ? v.replace(/^(.{4})(.{3})(.{3})$/, '$1 $2 $3') : v;   // 分段比較好核對
+function openConfirm() {
+  const f = TYPES[docType].f, rows = [];
+  for (const k of Object.keys(f)) {
+    let v = $(k).value.trim(); if (!v) continue;
+    let extra = '';
+    if (k === 'birth' && TYPES[docType].date === 'roc') extra = ` <small>(${rocToAd(v).replace('西元 ','')})</small>`;
+    if (k === 'idno' || k === 'ppno') v = groupId(v.toUpperCase());
+    rows.push(`<div class="cf-row"><div class="k">${esc(f[k].replace(/（.*?）/,''))} ${EN_LABEL[k]}</div><div class="v">${esc(v)}${extra}</div></div>`);
+  }
+  if (!rows.length) { alert('還沒有資料可以確認'); return; }
+  $('cfRows').innerHTML = rows.join('');
+  const v = $('cardView');
+  if (v.style.display === 'block') { $('cfImg').src = v.toDataURL('image/jpeg', 0.8); $('cfImg').style.display = 'block'; }
+  else $('cfImg').style.display = 'none';
+  $('confirm').style.display = 'block'; $('confirm').scrollTop = 0;
+}
+function confirmYes() {
+  $('confirm').style.display = 'none'; $('cfImg').src = '';
+  saveRecord(true);
+  $('status').textContent = '✓ 客人已確認並儲存。可以掃下一位。';
+  scrollTo({ top:0, behavior:'smooth' });
+}
+function confirmNo() {
+  $('confirm').style.display = 'none'; $('cfImg').src = '';
+  $('status').textContent = '客人說有錯，請修改後再按「給客人確認」。';
+  const first = Object.keys(TYPES[docType].f)[0];
+  $(first).scrollIntoView({ block:'center' }); $(first).focus();
+}
+
+function saveRecord(confirmed) {
+  const r = { type:docType, t:new Date().toISOString(), confirmed: confirmed === true };
   for (const k of ALL_F) r[k] = $(k).value.trim();
   r.idno = r.idno.toUpperCase(); r.ppno = r.ppno.toUpperCase();
   r.birthAd = TYPES[docType].date === 'roc' ? (rocToAd(r.birth).replace('西元 ','')) : r.birth;
@@ -465,10 +525,10 @@ function saveRecord() {
 function del(i) { const a = load(); a.splice(i,1); store(a); render(); }
 function clearAll() { if (confirm('確定刪除全部資料？')) { store([]); render(); } }
 function exportCsv() {
-  const rows = [['類別','姓名','英文姓名','出生日期(證件上)','出生日期(西元)','身分證/統一證號','護照號碼','國籍','手冊號碼','時間'],
+  const rows = [['類別','姓名','英文姓名','出生日期(證件上)','出生日期(西元)','身分證/統一證號','護照號碼','國籍','手冊號碼','客人確認','時間'],
     ...load().map(r => [TYPES[r.type||'id']?.label||'', r.name||'', r.nameEn||'', r.birth||'',
       r.birthAd || (r.type==='id'||!r.type ? rocToAd(r.birth||'').replace('西元 ','') : r.birth||''),
-      r.idno||'', r.ppno||'', r.nat||'', r.docno||'', r.t])];
+      r.idno||'', r.ppno||'', r.nat||'', r.docno||'', r.confirmed ? '是' : '', r.t])];
   const csv = '﻿' + rows.map(r => r.map(x => `"${String(x).replace(/"/g,'""')}"`).join(',')).join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type:'text/csv' }));
