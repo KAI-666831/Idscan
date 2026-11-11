@@ -53,6 +53,19 @@
   .cf-yes { background:#16a34a; } .cf-no { background:#fff; color:#dc2626; border:2px solid #dc2626; }
   .ck { color:#16a34a; font-weight:700; }
 
+  #pairModal { position:fixed; inset:0; z-index:30; background:rgba(0,0,0,.6); display:none; }
+  .pm-box { background:#fff; color:#111; margin:12vh 20px; border-radius:16px; padding:18px; text-align:center; }
+  #pairQr svg { width:100%; max-width:300px; height:auto; margin:12px auto; display:block; }
+  #toast { position:fixed; left:14px; right:14px; bottom:calc(env(safe-area-inset-bottom) + 16px); z-index:40; background:#16a34a; color:#fff;
+           border-radius:12px; padding:14px; font-size:16px; font-weight:600; opacity:0; transform:translateY(20px); transition:.25s; pointer-events:none; }
+  #toast.show { opacity:1; transform:none; } #toast.bad { background:#dc2626; }
+  #disp { position:fixed; inset:0; z-index:50; background:#fff; color:#111; display:none; overflow:auto;
+          padding:calc(env(safe-area-inset-top) + 24px) 18px calc(env(safe-area-inset-bottom) + 110px); }
+  .d-idle { font-size:40px; font-weight:700; text-align:center; margin-top:30vh; color:#333; }
+  .d-idle small { font-size:22px; color:#888; font-weight:400; }
+  body.disp > *:not(#disp):not(script) { display:none !important; }
+  body.disp #disp { display:block !important; }
+
   /* 全螢幕取景 / 裁切畫面 */
   #overlay { position:fixed; inset:0; background:#000; z-index:10; display:none; }
   #overlay video, #overlay img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
@@ -103,10 +116,38 @@
 </div>
 
 <div class="card">
+  <b>雙機確認</b>
+  <div id="pairState" style="font-size:14px;margin:6px 0 4px">尚未配對副機</div>
+  <button class="sec" id="pairBtn" onclick="openPairModal()">配對副機（給客人看的手機）</button>
+  <div style="font-size:12px;color:var(--muted);margin-top:6px">配對後按「給客人確認」會送到副機。資料加密傳送，轉送伺服器看不到內容。 <a href="#" onclick="unpair();return false">解除配對</a></div>
+</div>
+
+<div class="card">
   <b>已儲存 <span id="count">0</span> 筆</b>（只存在這支手機）
   <table id="list"><thead><tr><th>類別</th><th>姓名</th><th>生日</th><th>號碼</th><th>確認</th><th></th></tr></thead><tbody></tbody></table>
   <button class="sec" onclick="exportCsv()">匯出 CSV</button>
   <button class="danger" onclick="clearAll()">全部刪除</button>
+</div>
+
+<!-- 配對 QR code -->
+<div id="pairModal">
+  <div class="pm-box">
+    <b style="font-size:18px">用副機的「相機」掃這個 QR code</b>
+    <div id="pairQr"></div>
+    <div style="font-size:14px;color:#555">副機會打開客人確認畫面，連上後這裡會自動關閉。<br>副機不用安裝，用 Safari 開著就好。</div>
+    <button class="sec" onclick="closePairModal()">關閉</button>
+  </div>
+</div>
+<div id="toast"></div>
+
+<!-- 副機畫面 -->
+<div id="disp">
+  <div id="dispBody"></div>
+  <div id="dispBtns" class="cf-btns" style="display:none">
+    <button class="cf-no" onclick="dispAnswer(false)">✗ 有錯 Wrong</button>
+    <button class="cf-yes" onclick="dispAnswer(true)">✓ 正確 Correct</button>
+  </div>
+  <a href="#" onclick="dispUnpair();return false" style="position:fixed;top:calc(env(safe-area-inset-top) + 6px);right:12px;font-size:12px;color:#bbb">解除配對</a>
 </div>
 
 <!-- 給客人看的確認畫面 -->
@@ -137,6 +178,8 @@
 
 <script src="ort/ort.wasm.min.js"></script>
 <script src="docs.js"></script>
+<script src="qrcode.js"></script>
+<script src="pair.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const CARD = 85.6/54, BOOK = 125/88;
@@ -508,17 +551,36 @@ function render() {
 // ---------- 給客人確認 ----------
 const EN_LABEL = { name:'Name', nameEn:'Name', birth:'Date of birth', idno:'ID No.', ppno:'Passport No.', nat:'Nationality', docno:'Book No.' };
 const groupId = v => /^[A-Z0-9]{10}$/.test(v) ? v.replace(/^(.{4})(.{3})(.{3})$/, '$1 $2 $3') : v;   // 分段比較好核對
+function collectRecord() {
+  const r = { type:docType };
+  for (const k of ALL_F) r[k] = $(k).value.trim();
+  r.idno = r.idno.toUpperCase(); r.ppno = r.ppno.toUpperCase();
+  r.birthAd = TYPES[docType].date === 'roc' ? (rocToAd(r.birth).replace('西元 ','')) : r.birth;
+  return r;
+}
+const hasData = r => !!(r.name || r.nameEn || r.idno || r.ppno);
+function fillRecord(r) {
+  if (!r) return;
+  setType(r.type || 'id'); clearFields();
+  for (const k of ALL_F) if (r[k]) $(k).value = r[k];
+  checkId(); $('birthAd').textContent = TYPES[docType].date === 'roc' ? rocToAd($('birth').value) : '';
+  const first = Object.keys(TYPES[docType].f)[0];
+  $(first).scrollIntoView({ block:'center' });
+}
+function storeRecord(r) {
+  const a = load(); a.push({ ...r, t: r.t || new Date().toISOString() }); store(a); render();
+}
+
+let localRec = null;
 function openConfirm() {
-  const f = TYPES[docType].f, rows = [];
-  for (const k of Object.keys(f)) {
-    let v = $(k).value.trim(); if (!v) continue;
-    let extra = '';
-    if (k === 'birth' && TYPES[docType].date === 'roc') extra = ` <small>(${rocToAd(v).replace('西元 ','')})</small>`;
-    if (k === 'idno' || k === 'ppno') v = groupId(v.toUpperCase());
-    rows.push(`<div class="cf-row"><div class="k">${esc(f[k].replace(/（.*?）/,''))} ${EN_LABEL[k]}</div><div class="v">${esc(v)}${extra}</div></div>`);
-  }
-  if (!rows.length) { alert('還沒有資料可以確認'); return; }
-  $('cfRows').innerHTML = rows.join('');
+  const r = collectRecord();
+  if (!hasData(r)) { alert('還沒有資料可以確認'); return; }
+  if (isPaired()) { sendToDisplay(r); return; }
+  openLocalConfirm(r);
+}
+function openLocalConfirm(r) {
+  localRec = r;
+  $('cfRows').innerHTML = confirmRowsHtml(r);
   const v = $('cardView');
   if (v.style.display === 'block') { $('cfImg').src = v.toDataURL('image/jpeg', 0.8); $('cfImg').style.display = 'block'; }
   else $('cfImg').style.display = 'none';
@@ -526,7 +588,8 @@ function openConfirm() {
 }
 function confirmYes() {
   $('confirm').style.display = 'none'; $('cfImg').src = '';
-  saveRecord(true);
+  storeRecord({ ...localRec, confirmed:true, confirmedAt:new Date().toISOString() });
+  clearFields(); $('cardView').style.display = 'none';
   $('status').textContent = '✓ 客人已確認並儲存。可以掃下一位。';
   scrollTo({ top:0, behavior:'smooth' });
 }
@@ -536,16 +599,10 @@ function confirmNo() {
   const first = Object.keys(TYPES[docType].f)[0];
   $(first).scrollIntoView({ block:'center' }); $(first).focus();
 }
-
-function saveRecord(confirmed) {
-  const r = { type:docType, t:new Date().toISOString(), confirmed: confirmed === true };
-  for (const k of ALL_F) r[k] = $(k).value.trim();
-  r.idno = r.idno.toUpperCase(); r.ppno = r.ppno.toUpperCase();
-  r.birthAd = TYPES[docType].date === 'roc' ? (rocToAd(r.birth).replace('西元 ','')) : r.birth;
-  if (!r.name && !r.nameEn && !r.idno && !r.ppno) return;
-  const a = load(); a.push(r); store(a); render();
-  clearFields();
-  $('cardView').style.display = 'none';
+function saveRecord() {
+  const r = collectRecord(); if (!hasData(r)) return;
+  storeRecord({ ...r, confirmed:false });
+  clearFields(); $('cardView').style.display = 'none';
 }
 function del(i) { const a = load(); a.splice(i,1); store(a); render(); }
 function clearAll() { if (confirm('確定刪除全部資料？')) { store([]); render(); } }
@@ -561,8 +618,13 @@ function exportCsv() {
 }
 setType('id');
 render();
-// 開 app 時先在背景載入模型，按掃描時就不用等
-setTimeout(() => loadModel().then(() => loadDet()).then(() => { $('status').textContent = '辨識引擎已就緒，可離線使用。'; }).catch(e => { $('status').textContent = '模型載入失敗：' + e.message; }), 300);
+const dispPair = displayMode();
+if (dispPair) dispStart(dispPair);            // 這支是副機：只顯示客人確認畫面
+else {
+  opStart();
+  // 開 app 時先在背景載入模型，按掃描時就不用等
+  setTimeout(() => loadModel().then(() => loadDet()).then(() => { $('status').textContent = '辨識引擎已就緒，可離線使用。'; }).catch(e => { $('status').textContent = '模型載入失敗：' + e.message; }), 300);
+}
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script>
