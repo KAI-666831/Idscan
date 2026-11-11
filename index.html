@@ -22,7 +22,7 @@
   input[type=file] { display:none; }
   canvas#cardView { width:100%; border-radius:10px; margin-top:10px; display:none; }
   .seg { display:flex; gap:6px; margin-bottom:10px; }
-  .seg button { flex:1; padding:10px 0; font-size:15px; background:transparent; color:var(--accent); border:1px solid var(--accent); }
+  .seg button { flex:1; padding:10px 0; font-size:14px; background:transparent; color:var(--accent); border:1px solid var(--accent); }
   .seg button.on { background:var(--accent); color:#fff; }
   .field { margin:10px 0; }
   .hide { display:none !important; }
@@ -59,7 +59,10 @@
 <div class="card">
   <div id="types" class="seg">
     <button data-t="id" class="on">身分證</button>
+    <button data-t="arc">居留證</button>
     <button data-t="passport">護照</button>
+    <button data-t="seaman">船員證</button>
+    <button data-t="nhi">健保卡</button>
   </div>
   <button id="scanBtn" onclick="openCamera()">📷 掃描身分證正面</button>
   <button class="sec" onclick="document.getElementById('pick').click()">從相簿選擇</button>
@@ -70,12 +73,14 @@
 </div>
 
 <div class="card">
-  <div class="field"><label>姓名</label><input id="name" autocomplete="off"></div>
-  <div class="field"><label><span id="birthLabel">出生年月日（民國）</span><span id="birthAd"></span></label><input id="birth" autocomplete="off" placeholder="例：75/03/21"></div>
-  <div class="field passOnly hide"><label>護照號碼 <span id="ppCheck"></span></label><input id="ppno" autocomplete="off" autocapitalize="characters"></div>
-  <div class="field passOnly hide"><label>國籍</label><input id="nat" autocomplete="off" autocapitalize="characters"></div>
-  <div class="field"><label><span id="idLabel">身分證字號</span> <span id="idCheck"></span></label>
+  <div class="field" data-f="name"><label><span class="lb">姓名</span></label><input id="name" autocomplete="off"></div>
+  <div class="field" data-f="nameEn"><label><span class="lb">英文姓名</span></label><input id="nameEn" autocomplete="off" autocapitalize="characters"></div>
+  <div class="field" data-f="birth"><label><span class="lb">出生日期</span><span id="birthAd"></span></label><input id="birth" autocomplete="off"></div>
+  <div class="field" data-f="idno"><label><span class="lb">身分證字號</span> <span id="idCheck"></span></label>
     <input id="idno" autocomplete="off" autocapitalize="characters" oninput="checkId()"></div>
+  <div class="field" data-f="ppno"><label><span class="lb">護照號碼</span> <span id="ppCheck"></span></label><input id="ppno" autocomplete="off" autocapitalize="characters"></div>
+  <div class="field" data-f="nat"><label><span class="lb">國籍</span></label><input id="nat" autocomplete="off"></div>
+  <div class="field" data-f="docno"><label><span class="lb">手冊號碼</span></label><input id="docno" autocomplete="off" autocapitalize="characters"></div>
   <button onclick="saveRecord()">儲存這筆</button>
   <details><summary>辨識原文（除錯用）</summary><pre id="raw"></pre></details>
 </div>
@@ -92,35 +97,51 @@
   <img id="still" alt="">
   <div id="frame"></div>
   <div id="hint"></div>
-  <div id="zoomRow"><input id="zoom" type="range" min="1" max="4" step="0.01" value="1"></div>
+  <div id="zoomRow"><input id="zoom" type="range" min="0.3" max="4" step="0.01" value="1"></div>
   <div id="bar">
     <button class="sec" style="background:#0008;color:#fff;border-color:#fff" onclick="closeOverlay()">取消</button>
     <button id="shutter" onclick="capture()" aria-label="拍照"></button>
-    <button id="useBtn" style="display:none" onclick="useCrop()">使用</button>
+    <button id="useBtn" style="display:none" onclick="useCrop()">使用框內</button>
+    <button id="wholeBtn" class="hide" style="display:none" onclick="useWhole()">整張</button>
     <span id="spacer" style="flex:1"></span>
   </div>
 </div>
 
 <script src="ort/ort.wasm.min.js"></script>
+<script src="docs.js"></script>
 <script>
 const $ = id => document.getElementById(id);
+const CARD = 85.6/54, BOOK = 125/88;
+// 每種證件：取景框比例、要顯示的欄位與標題、生日格式（roc=民國 / ad=西元）
 const TYPES = {
-  id:       { label:'身分證', ratio:85.6/54, scan:'📷 掃描身分證正面', hint:'把身分證正面對準綠框，填滿框框、避開反光' },
-  passport: { label:'護照',   ratio:125/88,  scan:'📷 掃描護照資料頁', hint:'把護照照片那一頁對準綠框，最下面兩行英數字一定要拍進去' }
+  id:       { label:'身分證', ratio:CARD, scan:'📷 掃描身分證正面', hint:'把身分證正面對準綠框，填滿框框、避開反光', date:'roc',
+              f:{ name:'姓名', birth:'出生年月日（民國）', idno:'身分證字號' } },
+  arc:      { label:'居留證', ratio:CARD, scan:'📷 掃描居留證正面', hint:'把居留證正面對準綠框，避開雷射貼紙反光', date:'ad',
+              f:{ nameEn:'英文姓名', name:'中文姓名', birth:'出生日期（西元）', idno:'統一證號', ppno:'護照號碼', nat:'國籍' } },
+  passport: { label:'護照',   ratio:BOOK, scan:'📷 掃描護照資料頁', hint:'對準有照片的那一頁，最下面兩行英數字要拍進去', date:'ad',
+              f:{ nameEn:'英文姓名', name:'中文姓名', birth:'出生日期（西元）', ppno:'護照號碼', nat:'國籍', idno:'身分證字號（台灣護照）' } },
+  seaman:   { label:'船員證', ratio:BOOK, scan:'📷 掃描船員服務手冊', hint:'對準有照片、姓名、生日的那一頁', date:'roc',
+              f:{ name:'姓名', nameEn:'英文姓名', birth:'出生日期（民國）', idno:'身分證字號', docno:'手冊號碼' } },
+  nhi:      { label:'健保卡', ratio:CARD, scan:'📷 掃描健保卡正面', hint:'把健保卡正面對準綠框', date:'roc',
+              f:{ name:'姓名', nameEn:'英文姓名', birth:'出生日期（民國）', idno:'身分證／居留證號' } }
 };
+const ALL_F = ['name','nameEn','birth','idno','ppno','nat','docno'];
 let docType = 'id';
+function setType(t) {
+  docType = t;
+  document.querySelectorAll('#types button').forEach(x => x.classList.toggle('on', x.dataset.t === t));
+  $('scanBtn').textContent = TYPES[t].scan;
+  $('wholeBtn').classList.toggle('hide', t === 'id');
+  document.querySelectorAll('[data-f]').forEach(e => {
+    const lb = TYPES[t].f[e.dataset.f];
+    e.classList.toggle('hide', !lb);
+    if (lb) e.querySelector('.lb').textContent = lb;
+  });
+  $('birth').placeholder = TYPES[t].date === 'roc' ? '例：75/03/21' : '例：1990-03-21';
+}
+document.querySelectorAll('#types button').forEach(b => b.onclick = () => { setType(b.dataset.t); clearFields(); });
 const ratio = () => TYPES[docType].ratio;
-document.querySelectorAll('#types button').forEach(b => b.onclick = () => {
-  docType = b.dataset.t;
-  document.querySelectorAll('#types button').forEach(x => x.classList.toggle('on', x === b));
-  $('scanBtn').textContent = TYPES[docType].scan;
-  const pp = docType === 'passport';
-  document.querySelectorAll('.passOnly').forEach(e => e.classList.toggle('hide', !pp));
-  $('birthLabel').textContent = pp ? '出生日期（西元）' : '出生年月日（民國）';
-  $('birth').placeholder = pp ? '例：1990-03-21' : '例：75/03/21';
-  $('idLabel').textContent = pp ? '身分證字號（台灣護照才有）' : '身分證字號';
-  clearFields();
-});
+
 
 // ---------- 身分證字號檢查碼 ----------
 const LETTER = {A:10,B:11,C:12,D:13,E:14,F:15,G:16,H:17,I:34,J:18,K:19,L:20,M:21,N:22,O:35,P:23,Q:24,R:25,S:26,T:27,U:28,V:29,W:32,X:30,Y:31,Z:33};
@@ -204,7 +225,7 @@ async function openCamera() {
   mode = 'camera';
   $('video').srcObject = stream; $('video').style.display = 'block';
   $('still').style.display = 'none'; $('zoomRow').style.display = 'none';
-  $('shutter').style.display = 'block'; $('useBtn').style.display = 'none'; $('spacer').style.display = 'block';
+  $('shutter').style.display = 'block'; $('useBtn').style.display = 'none'; $('wholeBtn').style.display = 'none'; $('spacer').style.display = 'block';
   $('hint').textContent = TYPES[docType].hint;
   $('overlay').style.display = 'block'; placeFrame();
 }
@@ -247,6 +268,7 @@ $('pick').onchange = e => {
     pan = { x:0, y:0 }; $('zoom').value = 1;
     $('still').src = img.src; $('still').style.display = 'block'; $('video').style.display = 'none';
     $('shutter').style.display = 'none'; $('spacer').style.display = 'none'; $('useBtn').style.display = 'block';
+    $('wholeBtn').style.display = docType === 'id' ? 'none' : 'block';
     $('zoomRow').style.display = 'block';
     $('hint').textContent = '拖曳照片、用下方滑桿放大，讓身分證剛好填滿綠框';
     $('overlay').style.display = 'block'; placeFrame(); layoutStill();
@@ -266,6 +288,12 @@ let drag = null;
 $('still').addEventListener('pointerdown', e => { drag = { x:e.clientX, y:e.clientY, px:pan.x, py:pan.y }; $('still').setPointerCapture(e.pointerId); });
 $('still').addEventListener('pointermove', e => { if (!drag) return; pan.x = drag.px + e.clientX - drag.x; pan.y = drag.py + e.clientY - drag.y; layoutStill(); });
 $('still').addEventListener('pointerup', () => drag = null);
+function useWhole() {
+  const s = Math.min(1, 1600 / Math.max(img.width, img.height));
+  const c = document.createElement('canvas'); c.width = Math.round(img.width*s); c.height = Math.round(img.height*s);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  closeOverlay(); runOcr(c);
+}
 function useCrop() {
   const s = curScale(), r = frameRect();
   const left = (innerWidth - img.width*s)/2 + pan.x, top = (innerHeight - img.height*s)/2 - 30 + pan.y;
@@ -315,7 +343,7 @@ async function recRegion(card, x0, y0, x1, y1) {
     if (bi !== prev && bi !== 0) s += dict[bi] || '';
     prev = bi;
   }
-  return s.replace(/\s/g, '');
+  return s.trim().replace(/\s+/g, ' ');
 }
 
 const OFFSETS = [[0,0],[0,-0.02],[0,0.02],[-0.02,0],[0.02,0],[0,-0.04],[0,0.04],[-0.02,-0.02],[0.02,0.02]];
@@ -324,32 +352,34 @@ const topVote = c => { const e = Object.entries(c).sort((a,b) => b[1]-a[1]); ret
 const add = (c, k) => c[k] = (c[k]||0) + 1;
 
 function clearFields() {
-  ['name','birth','idno','ppno','nat'].forEach(k => $(k).value = '');
+  ALL_F.forEach(k => $(k).value = '');
   $('idCheck').textContent = ''; $('birthAd').textContent = ''; $('ppCheck').textContent = '';
 }
 
-async function runPassport(card, log) {
-  const l1 = {}, l2 = {}, l2data = {};
-  for (let k = 0; k < 13; k++) {
-    const dy = (k - 6) * 0.012;            // 從上到下掃過底部，找 MRZ 兩行
-    $('status').textContent = `辨識護照… ${k+1}/13`; $('prog').value = (k+1)/13;
-    const a = await recRegion(card, 0.0, 0.76+dy, 1.0, 0.885+dy); log.push('L1: '+a);
-    const b = await recRegion(card, 0.0, 0.865+dy, 1.0, 0.99+dy); log.push('L2: '+b);
-    for (const t of [a, b]) {
-      const r1 = parseMrz1(t); if (r1) add(l1, r1.name);
-      const r2 = parseMrz2(t); if (r2) { const key = JSON.stringify(r2); add(l2, key); }
-    }
-    if (topVote(l1)?.[1] >= 3 && topVote(l2)?.[1] >= 3) break;
-  }
-  const n = topVote(l1), r = topVote(l2);
-  $('name').value = n ? n[0] : '';
-  if (r) {
-    const d = JSON.parse(r[0]);
-    $('ppno').value = d.doc; $('nat').value = d.nat; $('birth').value = d.dob;
-    $('ppCheck').textContent = '✓ 檢查碼正確'; $('ppCheck').className = 'ok';
-    const tw = d.opt.match(/[A-Z][12]\d{8}/);
-    if (tw) { $('idno').value = tw[0]; checkId(); }
-  }
+// 依文字內容判斷是哪種證件（選錯類別時自動切換）
+function guessType(lines) {
+  const all = lines.map(L => L.t).join(' ');
+  if (/居留|Resident|ARC\b/i.test(all)) return 'arc';
+  if (/健康保|HEALTH\s*INS/i.test(all)) return 'nhi';
+  if (/<<|PASSPORT|護照號|HO\s*CHIEU/i.test(all)) return 'passport';
+  if (/BIRTHPLACE|身分證號碼|出生地/i.test(all)) return 'seaman';
+  if (/國民身分證/.test(all)) return 'id';
+  return null;
+}
+async function runGeneric(card, log) {
+  await loadDet();
+  $('status').textContent = '尋找文字…';
+  const lines = await readAllLines(card, (i, n) => { $('status').textContent = `辨識文字… ${i}/${n}`; $('prog').value = i/n; });
+  lines.forEach(L => log.push(L.t));
+  const g = guessType(lines);
+  if (g && g !== docType && g !== 'id') setType(g);
+  const r = ({ arc:parseArc, passport:parsePassportLines, seaman:parseSeaman, nhi:parseNhi })[docType](lines);
+  for (const k of ALL_F) if (r[k]) $(k).value = r[k];
+  checkId();
+  if (docType === 'passport' && r.mrz) { $('ppCheck').textContent = '✓ MRZ 檢查碼正確'; $('ppCheck').className = 'ok'; }
+  $('birthAd').textContent = TYPES[docType].date === 'roc' ? rocToAd($('birth').value) : '';
+  const miss = Object.keys(TYPES[docType].f).filter(k => !$(k).value).map(k => TYPES[docType].f[k]);
+  $('status').textContent = miss.length ? `完成。沒讀到：${miss.join('、')}，可直接手動填。` : '完成，請核對後儲存。';
 }
 
 async function runOcr(card) {
@@ -361,23 +391,23 @@ async function runOcr(card) {
   try {
     await loadModel();
     $('prog').style.display = 'block';
-    if (docType === 'passport') { await runPassport(card, log); $('status').textContent = '完成，請核對後儲存。'; }
+    if (docType !== 'id') { await runGeneric(card, log); }
     else {
     const ids = {}, names = {}, births = {};
     for (let k = 0; k < OFFSETS.length; k++) {
       const [dx, dy] = OFFSETS[k];
       $('status').textContent = `辨識中… ${k+1}/${OFFSETS.length}`; $('prog').value = (k+1)/OFFSETS.length;
       if (!(topVote(ids)?.[1] >= 3)) {
-        const t = (await recRegion(card, 0.62+dx, 0.82+dy, 1.0, 0.99+dy)).toUpperCase(); log.push('號: '+t);
+        const t = (await recRegion(card, 0.62+dx, 0.82+dy, 1.0, 0.99+dy)).toUpperCase().replace(/\s/g,''); log.push('號: '+t);
         for (const m of t.match(/[A-Z][0-9]{9}/g) || []) if (validId(m)) add(ids, m);
       }
       if (!(topVote(names)?.[1] >= 3)) {
-        const t = await recRegion(card, 0.0+dx, 0.40+dy, 0.70+dx, 0.62+dy); log.push('名: '+t);
+        const t = (await recRegion(card, 0.0+dx, 0.40+dy, 0.70+dx, 0.62+dy)).replace(/\s/g,''); log.push('名: '+t);
         const m = t.match(/名([一-鿿]{2,4})/) || t.match(/([一-鿿]{2,4})$/);
         if (m) add(names, [...m[1]].map(ch => TO_TRAD[ch] || ch).join(''));
       }
       if (!(topVote(births)?.[1] >= 3)) {
-        const t = await recRegion(card, 0.10+dx, 0.62+dy, 0.68+dx, 0.82+dy); log.push('生: '+t);
+        const t = (await recRegion(card, 0.10+dx, 0.62+dy, 0.68+dx, 0.82+dy)).replace(/\s/g,''); log.push('生: '+t);
         const m = t.match(/(\d{2,3})年(\d{1,2})月(\d{1,2})日/);
         if (m && +m[2] >= 1 && +m[2] <= 12 && +m[3] >= 1 && +m[3] <= 31)
           add(births, `${+m[1]}/${m[2].padStart(2,'0')}/${m[3].padStart(2,'0')}`);
@@ -401,7 +431,7 @@ function rocToAd(s) {
   const m = s.match(/^(\d{1,3})\/(\d{1,2})\/(\d{1,2})$/);
   return m ? `西元 ${Number(m[1])+1911}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}` : '';
 }
-$('birth').oninput = () => $('birthAd').textContent = docType === 'id' ? rocToAd($('birth').value) : '';
+$('birth').oninput = () => $('birthAd').textContent = TYPES[docType].date === 'roc' ? rocToAd($('birth').value) : '';
 
 function checkId() {
   const v = $('idno').value.trim().toUpperCase();
@@ -420,12 +450,14 @@ function render() {
   const a = load();
   $('count').textContent = a.length;
   $('list').tBodies[0].innerHTML = a.map((r,i) =>
-    `<tr><td>${esc(TYPES[r.type||'id']?.label||'')}</td><td>${esc(r.name)}</td><td>${esc(r.birth)}</td><td>${esc(r.ppno||r.idno)}</td><td><a href="#" onclick="del(${i});return false">刪</a></td></tr>`).join('');
+    `<tr><td>${esc(TYPES[r.type||'id']?.label||'')}</td><td>${esc(r.name||r.nameEn||'')}</td><td>${esc(r.birth)}</td><td>${esc(r.idno||r.ppno||'')}</td><td><a href="#" onclick="del(${i});return false">刪</a></td></tr>`).join('');
 }
 function saveRecord() {
-  const r = { type:docType, name:$('name').value.trim(), birth:$('birth').value.trim(), idno:$('idno').value.trim().toUpperCase(),
-              ppno:$('ppno').value.trim().toUpperCase(), nat:$('nat').value.trim().toUpperCase(), t:new Date().toISOString() };
-  if (!r.name && !r.idno && !r.ppno) return;
+  const r = { type:docType, t:new Date().toISOString() };
+  for (const k of ALL_F) r[k] = $(k).value.trim();
+  r.idno = r.idno.toUpperCase(); r.ppno = r.ppno.toUpperCase();
+  r.birthAd = TYPES[docType].date === 'roc' ? (rocToAd(r.birth).replace('西元 ','')) : r.birth;
+  if (!r.name && !r.nameEn && !r.idno && !r.ppno) return;
   const a = load(); a.push(r); store(a); render();
   clearFields();
   $('cardView').style.display = 'none';
@@ -433,13 +465,16 @@ function saveRecord() {
 function del(i) { const a = load(); a.splice(i,1); store(a); render(); }
 function clearAll() { if (confirm('確定刪除全部資料？')) { store([]); render(); } }
 function exportCsv() {
-  const rows = [['類別','姓名','出生日期','身分證/居留證號','護照號碼','國籍','時間'],
-    ...load().map(r => [TYPES[r.type||'id']?.label||'', r.name, r.birth, r.idno, r.ppno||'', r.nat||'', r.t])];
+  const rows = [['類別','姓名','英文姓名','出生日期(證件上)','出生日期(西元)','身分證/統一證號','護照號碼','國籍','手冊號碼','時間'],
+    ...load().map(r => [TYPES[r.type||'id']?.label||'', r.name||'', r.nameEn||'', r.birth||'',
+      r.birthAd || (r.type==='id'||!r.type ? rocToAd(r.birth||'').replace('西元 ','') : r.birth||''),
+      r.idno||'', r.ppno||'', r.nat||'', r.docno||'', r.t])];
   const csv = '﻿' + rows.map(r => r.map(x => `"${String(x).replace(/"/g,'""')}"`).join(',')).join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type:'text/csv' }));
   a.download = 'id_records.csv'; a.click();
 }
+setType('id');
 render();
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});

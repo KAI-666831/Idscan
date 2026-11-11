@@ -1,6 +1,6 @@
 // 程式本體：先抓網路最新版，沒網路才用快取
 // 辨識模型與引擎（model/、ort/）：檔案大，存進快取後就一直用快取
-const CACHE = 'idscan-v4';
+const CACHE = 'idscan-v5';
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(['./', './index.html'])));
   self.skipWaiting();
