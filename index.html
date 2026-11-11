@@ -86,7 +86,7 @@
 </head>
 <body>
 <h1>身分證辨識</h1>
-<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。</div>
+<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/12-e</span></div>
 
 <div class="card">
   <div id="types" class="seg">
@@ -649,7 +649,7 @@ else {
   setTimeout(() => loadModel().then(() => loadDet()).then(() => { $('status').textContent = '辨識引擎已就緒，可離線使用。'; }).catch(e => { $('status').textContent = '模型載入失敗：' + e.message; }), 300);
 }
 
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js', { updateViaCache:'none' }).then(r => r.update()).catch(()=>{});
 </script>
 </body>
 </html>
