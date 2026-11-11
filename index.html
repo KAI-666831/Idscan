@@ -21,7 +21,11 @@
   button.danger { background:transparent; color:var(--bad); border:1px solid var(--bad); margin-top:8px; }
   input[type=file] { display:none; }
   canvas#cardView { width:100%; border-radius:10px; margin-top:10px; display:none; }
+  .seg { display:flex; gap:6px; margin-bottom:10px; }
+  .seg button { flex:1; padding:10px 0; font-size:15px; background:transparent; color:var(--accent); border:1px solid var(--accent); }
+  .seg button.on { background:var(--accent); color:#fff; }
   .field { margin:10px 0; }
+  .hide { display:none !important; }
   .field label { font-size:13px; color:var(--muted); display:flex; justify-content:space-between; }
   .field input { width:100%; font-size:18px; padding:10px; border-radius:10px; border:1px solid #ccc;
          background:transparent; color:var(--fg); margin-top:4px; }
@@ -53,7 +57,11 @@
 <div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。</div>
 
 <div class="card">
-  <button onclick="openCamera()">📷 掃描身分證正面</button>
+  <div id="types" class="seg">
+    <button data-t="id" class="on">身分證</button>
+    <button data-t="passport">護照</button>
+  </div>
+  <button id="scanBtn" onclick="openCamera()">📷 掃描身分證正面</button>
   <button class="sec" onclick="document.getElementById('pick').click()">從相簿選擇</button>
   <input id="pick" type="file" accept="image/*">
   <canvas id="cardView"></canvas>
@@ -63,8 +71,10 @@
 
 <div class="card">
   <div class="field"><label>姓名</label><input id="name" autocomplete="off"></div>
-  <div class="field"><label>出生年月日（民國）<span id="birthAd"></span></label><input id="birth" autocomplete="off" placeholder="例：75/03/21"></div>
-  <div class="field"><label>身分證字號 <span id="idCheck"></span></label>
+  <div class="field"><label><span id="birthLabel">出生年月日（民國）</span><span id="birthAd"></span></label><input id="birth" autocomplete="off" placeholder="例：75/03/21"></div>
+  <div class="field passOnly hide"><label>護照號碼 <span id="ppCheck"></span></label><input id="ppno" autocomplete="off" autocapitalize="characters"></div>
+  <div class="field passOnly hide"><label>國籍</label><input id="nat" autocomplete="off" autocapitalize="characters"></div>
+  <div class="field"><label><span id="idLabel">身分證字號</span> <span id="idCheck"></span></label>
     <input id="idno" autocomplete="off" autocapitalize="characters" oninput="checkId()"></div>
   <button onclick="saveRecord()">儲存這筆</button>
   <details><summary>辨識原文（除錯用）</summary><pre id="raw"></pre></details>
@@ -72,7 +82,7 @@
 
 <div class="card">
   <b>已儲存 <span id="count">0</span> 筆</b>（只存在這支手機）
-  <table id="list"><thead><tr><th>姓名</th><th>生日</th><th>字號</th><th></th></tr></thead><tbody></tbody></table>
+  <table id="list"><thead><tr><th>類別</th><th>姓名</th><th>生日</th><th>號碼</th><th></th></tr></thead><tbody></tbody></table>
   <button class="sec" onclick="exportCsv()">匯出 CSV</button>
   <button class="danger" onclick="clearAll()">全部刪除</button>
 </div>
@@ -94,23 +104,87 @@
 <script src="ort/ort.wasm.min.js"></script>
 <script>
 const $ = id => document.getElementById(id);
-const CARD_RATIO = 85.6 / 54;
+const TYPES = {
+  id:       { label:'身分證', ratio:85.6/54, scan:'📷 掃描身分證正面', hint:'把身分證正面對準綠框，填滿框框、避開反光' },
+  passport: { label:'護照',   ratio:125/88,  scan:'📷 掃描護照資料頁', hint:'把護照照片那一頁對準綠框，最下面兩行英數字一定要拍進去' }
+};
+let docType = 'id';
+const ratio = () => TYPES[docType].ratio;
+document.querySelectorAll('#types button').forEach(b => b.onclick = () => {
+  docType = b.dataset.t;
+  document.querySelectorAll('#types button').forEach(x => x.classList.toggle('on', x === b));
+  $('scanBtn').textContent = TYPES[docType].scan;
+  const pp = docType === 'passport';
+  document.querySelectorAll('.passOnly').forEach(e => e.classList.toggle('hide', !pp));
+  $('birthLabel').textContent = pp ? '出生日期（西元）' : '出生年月日（民國）';
+  $('birth').placeholder = pp ? '例：1990-03-21' : '例：75/03/21';
+  $('idLabel').textContent = pp ? '身分證字號（台灣護照才有）' : '身分證字號';
+  clearFields();
+});
 
 // ---------- 身分證字號檢查碼 ----------
 const LETTER = {A:10,B:11,C:12,D:13,E:14,F:15,G:16,H:17,I:34,J:18,K:19,L:20,M:21,N:22,O:35,P:23,Q:24,R:25,S:26,T:27,U:28,V:29,W:32,X:30,Y:31,Z:33};
+// 支援：身分證 A123456789、新式居留證 A800000014（第二碼 8/9）、舊式居留證 AA00000009
 function validId(id) {
-  if (!/^[A-Z][12]\d{8}$/.test(id)) return false;
+  let d;
+  if (/^[A-Z][1289]\d{8}$/.test(id)) d = id.slice(1).split('').map(Number);
+  else if (/^[A-Z][A-D]\d{8}$/.test(id)) d = [LETTER[id[1]] % 10].concat(id.slice(2).split('').map(Number));
+  else return false;
   const n = LETTER[id[0]];
   let sum = Math.floor(n/10) + (n%10)*9;
   const w = [8,7,6,5,4,3,2,1];
-  for (let i=0;i<8;i++) sum += Number(id[i+1]) * w[i];
-  return (sum + Number(id[9])) % 10 === 0;
+  for (let i=0;i<8;i++) sum += d[i] * w[i];
+  return (sum + d[8]) % 10 === 0;
+}
+
+// ---------- 護照 MRZ（ICAO 9303）檢查碼 ----------
+function mrzCheck(s) {
+  const w = [7,3,1]; let sum = 0;
+  for (let i=0;i<s.length;i++) {
+    const c = s[i];
+    const v = c === '<' ? 0 : /\d/.test(c) ? +c : c.charCodeAt(0) - 55;
+    sum += v * w[i%3];
+  }
+  return sum % 10;
+}
+const toAlpha = s => s.replace(/0/g,'O').replace(/1/g,'I').replace(/5/g,'S').replace(/8/g,'B');
+const toDigit = s => s.replace(/[OQD]/g,'0').replace(/[IL]/g,'1').replace(/S/g,'5').replace(/B/g,'8').replace(/Z/g,'2');
+function mrzDate(yymmdd, past) {
+  const yy = +yymmdd.slice(0,2), now = new Date().getFullYear() % 100;
+  const y = past ? (yy > now ? 1900+yy : 2000+yy) : 2000+yy;
+  return `${y}-${yymmdd.slice(2,4)}-${yymmdd.slice(4,6)}`;
+}
+// 第二行：護照號碼(9)+檢查碼、國籍(3)、生日(6)+檢查碼、性別、效期(6)+檢查碼、個人號碼(14)
+function parseMrz2(t) {
+  t = t.toUpperCase().replace(/[^A-Z0-9<]/g, '');
+  const re = /([A-Z0-9]{5,9})(<{0,4})([0-9OQDILSBZ])([A-Z0<]{3})([0-9OQDILSBZ]{6})([0-9OQDILSBZ])([MFX<])([0-9OQDILSBZ]{6})([0-9OQDILSBZ])([A-Z0-9<]*)/;
+  for (let start = 0; start < t.length; start++) {
+    const m = t.slice(start).match(re); if (!m) break;
+    const doc = (m[1] + m[2]).padEnd(9, '<').slice(0, 9);
+    const docCk = +toDigit(m[3]), dob = toDigit(m[5]), dobCk = +toDigit(m[6]);
+    if (mrzCheck(doc) === docCk && mrzCheck(dob) === dobCk) {
+      const opt = m[10].replace(/<+$/, '').replace(/<.*$/, '');
+      return { doc: doc.replace(/<+$/, ''), nat: toAlpha(m[4]).replace(/</g, ''), dob: mrzDate(dob, true), sex: m[7], opt };
+    }
+    start += m.index;
+  }
+  return null;
+}
+// 第一行：P<國籍 姓<<名
+function parseMrz1(t) {
+  t = t.toUpperCase().replace(/[^A-Z0-9<]/g, '');
+  const m = t.match(/P[A-Z<]([A-Z0<]{3})([A-Z0-9<]{2,})/); if (!m) return null;
+  const body = toAlpha(m[2]).replace(/<+$/, '');
+  const parts = body.split(/<{2,}/);
+  const name = parts.length > 1 ? `${parts[0].replace(/</g,' ')}, ${parts[1].replace(/</g,' ')}` : body.replace(/</g,' ');
+  return name.trim().length >= 2 ? { name: name.trim().replace(/\s+/g,' ') } : null;
 }
 
 // ---------- 取景框：放在畫面中央、身分證比例 ----------
 function frameRect() {
   const W = innerWidth, H = innerHeight;
-  const w = W * 0.92, h = w / CARD_RATIO;
+  let w = W * 0.92, h = w / ratio();
+  if (h > H * 0.6) { h = H * 0.6; w = h * ratio(); }
   return { x:(W-w)/2, y:(H-h)/2 - 30, w, h };
 }
 function placeFrame() {
@@ -131,7 +205,7 @@ async function openCamera() {
   $('video').srcObject = stream; $('video').style.display = 'block';
   $('still').style.display = 'none'; $('zoomRow').style.display = 'none';
   $('shutter').style.display = 'block'; $('useBtn').style.display = 'none'; $('spacer').style.display = 'block';
-  $('hint').textContent = '把身分證正面對準綠框，填滿框框、避開反光';
+  $('hint').textContent = TYPES[docType].hint;
   $('overlay').style.display = 'block'; placeFrame();
 }
 function closeOverlay() {
@@ -150,7 +224,7 @@ function cropFromVideo() {
 }
 function drawCrop(src, sx, sy, sw, sh) {
   const c = document.createElement('canvas');
-  c.width = 1600; c.height = Math.round(1600 / CARD_RATIO);
+  c.width = 1600; c.height = Math.round(1600 / ratio());
   c.getContext('2d').drawImage(src, sx, sy, sw, sh, 0, 0, c.width, c.height);
   return c;
 }
@@ -249,16 +323,46 @@ const TO_TRAD = { '黄':'黃','颖':'穎','华':'華','国':'國','伟':'偉','�
 const topVote = c => { const e = Object.entries(c).sort((a,b) => b[1]-a[1]); return e.length ? e[0] : null; };
 const add = (c, k) => c[k] = (c[k]||0) + 1;
 
+function clearFields() {
+  ['name','birth','idno','ppno','nat'].forEach(k => $(k).value = '');
+  $('idCheck').textContent = ''; $('birthAd').textContent = ''; $('ppCheck').textContent = '';
+}
+
+async function runPassport(card, log) {
+  const l1 = {}, l2 = {}, l2data = {};
+  for (let k = 0; k < 13; k++) {
+    const dy = (k - 6) * 0.012;            // 從上到下掃過底部，找 MRZ 兩行
+    $('status').textContent = `辨識護照… ${k+1}/13`; $('prog').value = (k+1)/13;
+    const a = await recRegion(card, 0.0, 0.76+dy, 1.0, 0.885+dy); log.push('L1: '+a);
+    const b = await recRegion(card, 0.0, 0.865+dy, 1.0, 0.99+dy); log.push('L2: '+b);
+    for (const t of [a, b]) {
+      const r1 = parseMrz1(t); if (r1) add(l1, r1.name);
+      const r2 = parseMrz2(t); if (r2) { const key = JSON.stringify(r2); add(l2, key); }
+    }
+    if (topVote(l1)?.[1] >= 3 && topVote(l2)?.[1] >= 3) break;
+  }
+  const n = topVote(l1), r = topVote(l2);
+  $('name').value = n ? n[0] : '';
+  if (r) {
+    const d = JSON.parse(r[0]);
+    $('ppno').value = d.doc; $('nat').value = d.nat; $('birth').value = d.dob;
+    $('ppCheck').textContent = '✓ 檢查碼正確'; $('ppCheck').className = 'ok';
+    const tw = d.opt.match(/[A-Z][12]\d{8}/);
+    if (tw) { $('idno').value = tw[0]; checkId(); }
+  }
+}
+
 async function runOcr(card) {
   const view = $('cardView');
   view.width = card.width; view.height = card.height;
   view.getContext('2d').drawImage(card, 0, 0); view.style.display = 'block';
-  $('name').value = $('birth').value = $('idno').value = '';
-  $('idCheck').textContent = ''; $('birthAd').textContent = '';
+  clearFields();
   const log = [];
   try {
     await loadModel();
     $('prog').style.display = 'block';
+    if (docType === 'passport') { await runPassport(card, log); $('status').textContent = '完成，請核對後儲存。'; }
+    else {
     const ids = {}, names = {}, births = {};
     for (let k = 0; k < OFFSETS.length; k++) {
       const [dx, dy] = OFFSETS[k];
@@ -285,6 +389,7 @@ async function runOcr(card) {
     $('birth').value = topVote(births)?.[0] || '';
     $('birthAd').textContent = rocToAd($('birth').value);
     $('status').textContent = '完成，請核對後儲存。空白或有錯的欄位可直接修改。';
+    }
   } catch (e) {
     $('status').textContent = '辨識失敗：' + (e && e.message || e);
   }
@@ -296,7 +401,7 @@ function rocToAd(s) {
   const m = s.match(/^(\d{1,3})\/(\d{1,2})\/(\d{1,2})$/);
   return m ? `西元 ${Number(m[1])+1911}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}` : '';
 }
-$('birth').oninput = () => $('birthAd').textContent = rocToAd($('birth').value);
+$('birth').oninput = () => $('birthAd').textContent = docType === 'id' ? rocToAd($('birth').value) : '';
 
 function checkId() {
   const v = $('idno').value.trim().toUpperCase();
@@ -315,19 +420,21 @@ function render() {
   const a = load();
   $('count').textContent = a.length;
   $('list').tBodies[0].innerHTML = a.map((r,i) =>
-    `<tr><td>${esc(r.name)}</td><td>${esc(r.birth)}</td><td>${esc(r.idno)}</td><td><a href="#" onclick="del(${i});return false">刪</a></td></tr>`).join('');
+    `<tr><td>${esc(TYPES[r.type||'id']?.label||'')}</td><td>${esc(r.name)}</td><td>${esc(r.birth)}</td><td>${esc(r.ppno||r.idno)}</td><td><a href="#" onclick="del(${i});return false">刪</a></td></tr>`).join('');
 }
 function saveRecord() {
-  const r = { name:$('name').value.trim(), birth:$('birth').value.trim(), idno:$('idno').value.trim().toUpperCase(), t:new Date().toISOString() };
-  if (!r.name && !r.idno) return;
+  const r = { type:docType, name:$('name').value.trim(), birth:$('birth').value.trim(), idno:$('idno').value.trim().toUpperCase(),
+              ppno:$('ppno').value.trim().toUpperCase(), nat:$('nat').value.trim().toUpperCase(), t:new Date().toISOString() };
+  if (!r.name && !r.idno && !r.ppno) return;
   const a = load(); a.push(r); store(a); render();
-  $('name').value = $('birth').value = $('idno').value = ''; $('idCheck').textContent=''; $('birthAd').textContent='';
+  clearFields();
   $('cardView').style.display = 'none';
 }
 function del(i) { const a = load(); a.splice(i,1); store(a); render(); }
 function clearAll() { if (confirm('確定刪除全部資料？')) { store([]); render(); } }
 function exportCsv() {
-  const rows = [['姓名','出生(民國)','身分證字號','時間'], ...load().map(r => [r.name, r.birth, r.idno, r.t])];
+  const rows = [['類別','姓名','出生日期','身分證/居留證號','護照號碼','國籍','時間'],
+    ...load().map(r => [TYPES[r.type||'id']?.label||'', r.name, r.birth, r.idno, r.ppno||'', r.nat||'', r.t])];
   const csv = '﻿' + rows.map(r => r.map(x => `"${String(x).replace(/"/g,'""')}"`).join(',')).join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type:'text/csv' }));
