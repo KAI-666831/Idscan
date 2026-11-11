@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="身分證辨識">
+<title>身分證辨識（離線）</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --fg:#1d1f23; --muted:#6b7280; --ok:#16a34a; --bad:#dc2626; --accent:#2563eb; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111317; --card:#1b1e24; --fg:#e8eaed; --muted:#9aa0a6; } }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,"PingFang TC",sans-serif; background:var(--bg); color:var(--fg);
+         padding:calc(env(safe-area-inset-top) + 12px) 14px calc(env(safe-area-inset-bottom) + 20px); }
+  h1 { font-size:20px; margin:4px 0 2px; }
+  .sub { color:var(--muted); font-size:13px; margin-bottom:12px; }
+  .card { background:var(--card); border-radius:14px; padding:14px; margin-bottom:12px; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+  button, label.btn { display:block; width:100%; padding:14px; font-size:17px; border:0; border-radius:12px;
+         background:var(--accent); color:#fff; text-align:center; font-weight:600; }
+  button.sec { background:transparent; color:var(--accent); border:1px solid var(--accent); margin-top:8px; }
+  button.danger { background:transparent; color:var(--bad); border:1px solid var(--bad); margin-top:8px; }
+  input[type=file] { display:none; }
+  img#preview { width:100%; border-radius:10px; margin-top:10px; display:none; }
+  .field { margin:10px 0; }
+  .field label { font-size:13px; color:var(--muted); display:flex; justify-content:space-between; }
+  .field input { width:100%; font-size:18px; padding:10px; border-radius:10px; border:1px solid #ccc;
+         background:transparent; color:var(--fg); margin-top:4px; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  #status { font-size:14px; color:var(--muted); margin-top:10px; min-height:20px; }
+  progress { width:100%; height:6px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  td, th { padding:6px 4px; border-bottom:1px solid rgba(128,128,128,.25); text-align:left; }
+  details { font-size:12px; color:var(--muted); margin-top:8px; }
+  pre { white-space:pre-wrap; word-break:break-all; }
+</style>
+</head>
+<body>
+<h1>身分證辨識</h1>
+<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。</div>
+
+<div class="card">
+  <label class="btn" for="cam">📷 拍身分證正面</label>
+  <input id="cam" type="file" accept="image/*" capture="environment">
+  <button class="sec" onclick="document.getElementById('pick').click()">從相簿選擇</button>
+  <input id="pick" type="file" accept="image/*">
+  <img id="preview" alt="">
+  <div id="status">第一次使用需連網下載辨識模型（約 15MB），之後可離線使用。</div>
+  <progress id="prog" value="0" max="1" style="display:none"></progress>
+</div>
+
+<div class="card">
+  <div class="field"><label>姓名</label><input id="name" autocomplete="off"></div>
+  <div class="field"><label>出生年月日（民國）<span id="birthAd"></span></label><input id="birth" autocomplete="off" placeholder="例：75/03/21"></div>
+  <div class="field"><label>身分證字號 <span id="idCheck"></span></label>
+    <input id="idno" autocomplete="off" autocapitalize="characters" oninput="checkId()"></div>
+  <button onclick="saveRecord()">儲存這筆</button>
+  <details><summary>辨識原文（除錯用）</summary><pre id="raw"></pre></details>
+</div>
+
+<div class="card">
+  <b>已儲存 <span id="count">0</span> 筆</b>（只存在這支手機）
+  <table id="list"><thead><tr><th>姓名</th><th>生日</th><th>字號</th><th></th></tr></thead><tbody></tbody></table>
+  <button class="sec" onclick="exportCsv()">匯出 CSV</button>
+  <button class="danger" onclick="clearAll()">全部刪除</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+// ---------- 身分證字號檢查碼 ----------
+const LETTER = {A:10,B:11,C:12,D:13,E:14,F:15,G:16,H:17,I:34,J:18,K:19,L:20,M:21,N:22,O:35,P:23,Q:24,R:25,S:26,T:27,U:28,V:29,W:32,X:30,Y:31,Z:33};
+function validId(id) {
+  if (!/^[A-Z][12]\d{8}$/.test(id)) return false;
+  const n = LETTER[id[0]];
+  let sum = Math.floor(n/10) + (n%10)*9;
+  const w = [8,7,6,5,4,3,2,1];
+  for (let i=0;i<8;i++) sum += Number(id[i+1]) * w[i];
+  sum += Number(id[9]);
+  return sum % 10 === 0;
+}
+
+// ---------- 從辨識文字抓欄位 ----------
+function parseText(raw) {
+  const t = raw.replace(/[ \t　]/g, '');
+  const out = { name:'', birth:'', idno:'' };
+
+  // 字號：把數字位置常見誤認的字母換回數字
+  const fix = s => s.replace(/[Oo]/g,'0').replace(/[Il|]/g,'1').replace(/S/g,'5').replace(/B/g,'8').replace(/Z/g,'2');
+  const cands = t.toUpperCase().match(/[A-Z][12IL][0-9OISBZ]{8}/g) || [];
+  for (const c of cands) {
+    const id = c[0] + fix(c.slice(1));
+    if (validId(id)) { out.idno = id; break; }
+  }
+  if (!out.idno && cands.length) out.idno = cands[0][0] + fix(cands[0].slice(1));
+
+  // 出生日期：優先找「出生」後面的，否則取第一個民國日期（第二個通常是發證日期）
+  const dateRe = /民國?(\d{2,3})年(\d{1,2})月(\d{1,2})日/g;
+  const afterBirth = t.split(/出生/)[1];
+  let m = afterBirth ? new RegExp(dateRe.source).exec(afterBirth) : null;
+  if (!m) m = new RegExp(dateRe.source).exec(t);
+  if (m) out.birth = `${m[1]}/${m[2].padStart(2,'0')}/${m[3].padStart(2,'0')}`;
+
+  // 姓名：「姓名」後面 2~4 個中文字
+  const nm = t.match(/姓名[:：]?([一-鿿]{2,4})/);
+  if (nm) out.name = nm[1].replace(/出生.*$/, '');
+  return out;
+}
+
+function rocToAd(s) {
+  const m = s.match(/^(\d{2,3})\/(\d{1,2})\/(\d{1,2})$/);
+  return m ? `西元 ${Number(m[1])+1911}-${m[2]}-${m[3]}` : '';
+}
+
+// ---------- 影像前處理：放大、灰階、拉對比 ----------
+function preprocess(file) {
+  return new Promise(res => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(2000 / Math.max(img.width, img.height), 2.5);
+      const c = document.createElement('canvas');
+      c.width = img.width * scale; c.height = img.height * scale;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      const d = ctx.getImageData(0, 0, c.width, c.height), p = d.data;
+      for (let i=0;i<p.length;i+=4) {
+        let g = 0.299*p[i] + 0.587*p[i+1] + 0.114*p[i+2];
+        g = Math.max(0, Math.min(255, (g - 128) * 1.6 + 128));
+        p[i]=p[i+1]=p[i+2]=g;
+      }
+      ctx.putImageData(d, 0, 0);
+      URL.revokeObjectURL(img.src);
+      res(c);
+    };
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+// ---------- OCR ----------
+let worker = null;
+const $ = id => document.getElementById(id);
+async function getWorker() {
+  if (worker) return worker;
+  $('prog').style.display = 'block';
+  worker = await Tesseract.createWorker('chi_tra+eng', 1, {
+    logger: m => {
+      if (m.progress != null) $('prog').value = m.progress;
+      $('status').textContent = ({ 'loading language traineddata':'載入辨識模型…', 'recognizing text':'辨識中…' })[m.status] || m.status;
+    }
+  });
+  return worker;
+}
+
+async function handleFile(file) {
+  if (!file) return;
+  $('preview').src = URL.createObjectURL(file);
+  $('preview').style.display = 'block';
+  try {
+    const canvas = await preprocess(file);
+    const w = await getWorker();
+    const { data } = await w.recognize(canvas);
+    $('raw').textContent = data.text;
+    const r = parseText(data.text);
+    $('name').value = r.name; $('birth').value = r.birth; $('idno').value = r.idno;
+    $('birthAd').textContent = rocToAd(r.birth);
+    checkId();
+    $('status').textContent = '完成，請核對後儲存。';
+  } catch (e) {
+    $('status').textContent = '辨識失敗：' + e.message;
+  }
+  $('prog').style.display = 'none';
+}
+$('cam').onchange = e => handleFile(e.target.files[0]);
+$('pick').onchange = e => handleFile(e.target.files[0]);
+$('birth').oninput = () => $('birthAd').textContent = rocToAd($('birth').value);
+
+function checkId() {
+  const v = $('idno').value.trim().toUpperCase();
+  const el = $('idCheck');
+  if (!v) { el.textContent=''; return; }
+  el.textContent = validId(v) ? '✓ 檢查碼正確' : '✗ 檢查碼不符';
+  el.className = validId(v) ? 'ok' : 'bad';
+}
+
+// ---------- 本機儲存 ----------
+const KEY = 'idscan_records';
+const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; } };
+const store = a => { try { localStorage.setItem(KEY, JSON.stringify(a)); } catch {} };
+function render() {
+  const a = load();
+  $('count').textContent = a.length;
+  $('list').tBodies[0].innerHTML = a.map((r,i) =>
+    `<tr><td>${r.name}</td><td>${r.birth}</td><td>${r.idno}</td><td><a href="#" onclick="del(${i});return false">刪</a></td></tr>`).join('');
+}
+function saveRecord() {
+  const r = { name:$('name').value.trim(), birth:$('birth').value.trim(), idno:$('idno').value.trim().toUpperCase(), t:new Date().toISOString() };
+  if (!r.name && !r.idno) return;
+  const a = load(); a.push(r); store(a); render();
+  $('name').value = $('birth').value = $('idno').value = ''; $('idCheck').textContent=''; $('birthAd').textContent='';
+  $('preview').style.display='none';
+}
+function del(i) { const a = load(); a.splice(i,1); store(a); render(); }
+function clearAll() { if (confirm('確定刪除全部資料？')) { store([]); render(); } }
+function exportCsv() {
+  const rows = [['姓名','出生(民國)','身分證字號','時間'], ...load().map(r => [r.name, r.birth, r.idno, r.t])];
+  const csv = '﻿' + rows.map(r => r.map(x => `"${String(x).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type:'text/csv' }));
+  a.download = 'id_records.csv'; a.click();
+}
+render();
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script>
+</body>
+</html>
