@@ -110,7 +110,7 @@
 </head>
 <body>
 <h1>身分證辨識</h1>
-<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/12-h</span></div>
+<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/12-i</span></div>
 
 <div class="card">
   <div id="types" class="seg">
@@ -146,6 +146,21 @@
 </div>
 
 <div class="card">
+  <b>雙機確認</b>
+  <div id="pairState" style="font-size:14px;margin:6px 0 4px">尚未配對副機</div>
+  <button class="sec" id="pairBtn" onclick="openPairModal()">配對副機（給客人看的手機）</button>
+  <div style="font-size:12px;color:var(--muted);margin-top:6px">配對後按「給客人確認」會送到副機。資料加密傳送，轉送伺服器看不到內容。 <a href="#" onclick="unpair();return false">解除配對</a></div>
+</div>
+
+<div class="card">
+  <b>已儲存 <span id="count">0</span> 筆</b>（只存在這支手機）
+  <table id="list"><thead><tr><th>類別</th><th>姓名</th><th>生日</th><th>號碼</th><th>確認</th><th></th></tr></thead><tbody></tbody></table>
+  <button onclick="exportSimple()">匯出名單 CSV（姓名・生日・證號）</button>
+  <button class="sec" onclick="exportCsv()">匯出完整 CSV</button>
+  <button class="danger" onclick="clearAll()">全部刪除</button>
+</div>
+
+<div class="card">
   <b>出港名單</b>
   <div class="field"><label>船名</label><input id="shipName" placeholder="例：大益娛樂漁船(CT3-6283)"></div>
   <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
@@ -168,20 +183,6 @@
   <div id="mfPage"></div>
 </div>
 
-<div class="card">
-  <b>雙機確認</b>
-  <div id="pairState" style="font-size:14px;margin:6px 0 4px">尚未配對副機</div>
-  <button class="sec" id="pairBtn" onclick="openPairModal()">配對副機（給客人看的手機）</button>
-  <div style="font-size:12px;color:var(--muted);margin-top:6px">配對後按「給客人確認」會送到副機。資料加密傳送，轉送伺服器看不到內容。 <a href="#" onclick="unpair();return false">解除配對</a></div>
-</div>
-
-<div class="card">
-  <b>已儲存 <span id="count">0</span> 筆</b>（只存在這支手機）
-  <table id="list"><thead><tr><th>類別</th><th>姓名</th><th>生日</th><th>號碼</th><th>確認</th><th></th></tr></thead><tbody></tbody></table>
-  <button onclick="exportSimple()">匯出名單 CSV（姓名・生日・證號）</button>
-  <button class="sec" onclick="exportCsv()">匯出完整 CSV</button>
-  <button class="danger" onclick="clearAll()">全部刪除</button>
-</div>
 
 <!-- 配對 QR code -->
 <div id="pairModal">
