@@ -114,8 +114,8 @@ function parseNhi(lines) {
   return r;
 }
 
-// ---------- 船員服務手冊 ----------
-function parseSeaman(lines) {
+// ---------- 船員服務手冊（只取中文姓名）----------
+async function parseSeaman(lines, img) {
   const r = {};
   const ids = findIds(lines); if (ids.length) r.idno = ids[0].v;
   // 生日在表格最上面一列日期：照閱讀順序取第一個合理的民國日期
@@ -125,10 +125,22 @@ function parseSeaman(lines) {
   }
   for (const L of lines) { const m = L.t.toUpperCase().match(/([A-Z]{3}\d{6})/); if (m) { r.docno = m[1]; break; } }
   const bl = lines.find(L => /出生日期|BIRTH/i.test(L.t)), lim = bl ? bl.cy : 0.4;
-  const zh = lines.filter(L => L.cy < lim && CJK.test(L.t) && !LABELS.test(L.t));
-  r.name = zh.length ? zh[0].t : '';
-  const en = lines.filter(L => L.cy < lim && isEnName(L.t.toUpperCase()));
-  r.nameEn = en.length ? en[0].t.toUpperCase() : '';
+  const votes = {};
+  const vote = s => { s = (s || '').replace(/[^\u4e00-\u9fff]/g, ''); if (s.length >= 2 && s.length <= 4 && !LABELS.test(s) && !/日期|姓名|出生|住址|身分|號碼|有效|發照/.test(s)) votes[s] = (votes[s] || 0) + 1; };
+  // 1) 偵測到的中文框
+  lines.filter(L => L.cy < lim && CJK.test(L.t)).forEach(L => vote(L.t));
+  // 2) 中文姓名印在英文姓名正上方，字很淡時偵測會漏，直接讀那一條
+  const en = lines.find(L => L.cy < lim && isEnName(L.t.toUpperCase()));
+  if (en && img) {
+    const h = en.y1 - en.y0, w = en.x1 - en.x0;
+    for (const dy of [0, 0.15, -0.15]) for (const k of [1.2, 1.5]) {
+      vote(await recRegion(img, en.x0 - w*0.25, en.y0 - h*(k+dy), en.x1 + w*0.25, en.y0 + h*0.15 - h*dy));
+    }
+  }
+  // 讀到一半的（例如「李承」）算給完整的（「李承翰」）
+  const score = c => Object.entries(votes).reduce((n, [k, v]) => n + (c.includes(k) ? v : 0), 0);
+  const best = Object.keys(votes).map(k => [k, score(k)]).sort((a,b) => b[1]-a[1] || b[0].length - a[0].length)[0];
+  r.name = best ? best[0] : '';
   return r;
 }
 

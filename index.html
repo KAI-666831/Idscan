@@ -86,7 +86,7 @@
 </head>
 <body>
 <h1>身分證辨識</h1>
-<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/12-e</span></div>
+<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/12-f</span></div>
 
 <div class="card">
   <div id="types" class="seg">
@@ -196,7 +196,7 @@ const TYPES = {
   passport: { label:'護照',   ratio:BOOK, scan:'📷 掃描護照資料頁', hint:'對準有照片的那一頁，最下面兩行英數字要拍進去', date:'ad',
               f:{ nameEn:'英文姓名', ppno:'護照號碼', birth:'出生日期（西元）', nat:'國籍', name:'中文姓名', idno:'身分證字號（台灣護照）' } },
   seaman:   { label:'船員證', ratio:BOOK, scan:'📷 掃描船員服務手冊', hint:'對準有照片、姓名、生日的那一頁', date:'roc',
-              f:{ name:'姓名', nameEn:'英文姓名', birth:'出生日期（民國）', idno:'身分證字號', docno:'手冊號碼' } },
+              f:{ name:'姓名', birth:'出生日期（民國）', idno:'身分證字號', docno:'手冊號碼' } },
   nhi:      { label:'健保卡', ratio:CARD, scan:'📷 掃描健保卡正面', hint:'把健保卡正面對準綠框', date:'roc',
               f:{ name:'姓名', nameEn:'英文姓名', birth:'出生日期（民國）', idno:'身分證／居留證號' } }
 };
@@ -479,8 +479,8 @@ async function runGeneric(card, log) {
   lines.forEach(L => log.push(L.t));
   const g = guessType(lines);
   if (g && g !== docType && g !== 'id') setType(g);
-  const r = ({ arc:parseArc, passport:parsePassportLines, seaman:parseSeaman, nhi:parseNhi })[docType](lines);
-  for (const k of ALL_F) if (r[k]) $(k).value = r[k];
+  const r = await ({ arc:parseArc, passport:parsePassportLines, seaman:parseSeaman, nhi:parseNhi })[docType](lines, card);
+  for (const k of ALL_F) if (r[k] && TYPES[docType].f[k]) $(k).value = r[k];
   checkId();
   if (docType === 'passport' && r.mrz) { $('ppCheck').textContent = '✓ MRZ 檢查碼正確'; $('ppCheck').className = 'ok'; }
   $('birthAd').textContent = TYPES[docType].date === 'roc' ? rocToAd($('birth').value) : '';
@@ -572,7 +572,7 @@ const hasData = r => !!(r.name || r.nameEn || r.idno || r.ppno);
 function fillRecord(r) {
   if (!r) return;
   setType(r.type || 'id'); clearFields();
-  for (const k of ALL_F) if (r[k]) $(k).value = r[k];
+  for (const k of ALL_F) if (r[k] && TYPES[docType].f[k]) $(k).value = r[k];
   checkId(); $('birthAd').textContent = TYPES[docType].date === 'roc' ? rocToAd($('birth').value) : '';
   const first = Object.keys(TYPES[docType].f)[0];
   $(first).scrollIntoView({ block:'center' });
