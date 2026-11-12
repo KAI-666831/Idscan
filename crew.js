@@ -126,20 +126,20 @@ function openManifest() {
 function closeManifest() { $('manifest').style.display = 'none'; }
 
 // 存成圖片（方便用 LINE 傳或直接列印）
-function manifestImage() {
+function renderManifestCanvas() {
   const { title, crew, pax } = manifestData();
   const rows = [...crew.map((r, i) => [i + 1, { ...r, role: crewRole(r) }, 'crew']),
                 ...Array.from({ length: Math.max(23, pax.length) }, (_, i) => [i + 1, pax[i] ? { ...pax[i], role: undefined } : null, 'pax'])];
-  const W = 1654, cols = [0.07, 0.22, 0.11, 0.22, 0.24, 0.14], X0 = 90, TW = W - 180, RH = 62, TOP = 200;
+  const W = 2000, cols = [0.07, 0.22, 0.11, 0.22, 0.24, 0.14], X0 = 100, TW = W - 200, RH = 74, TOP = 230;
   const H = TOP + RH * (rows.length + 1) + 120;
   const c = document.createElement('canvas'); c.width = W; c.height = H;
   const g = c.getContext('2d');
   g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.fillStyle = '#000'; g.strokeStyle = '#000';
   const F = '"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif';
-  g.font = `600 52px ${F}`; g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillText(title, W / 2, 120);
+  g.font = `600 62px ${F}`; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(title, W / 2, 140);
   const xs = [X0]; cols.forEach(w => xs.push(xs[xs.length - 1] + w * TW));
-  const cell = (txt, i, y, size = 34) => {
+  const cell = (txt, i, y, size = 40) => {
     g.font = `${size}px ${F}`; let s = size;
     while (g.measureText(txt).width > (xs[i+1] - xs[i]) - 16 && s > 18) { s -= 2; g.font = `${s}px ${F}`; }
     g.fillText(txt, (xs[i] + xs[i+1]) / 2, y + RH / 2);
@@ -156,8 +156,8 @@ function manifestImage() {
     } else cell('/   /   /', 3, y);
     const sx = r ? inferSex(r) : '';
     const cx = (xs[2] + xs[3]) / 2;
-    g.font = `34px ${F}`; g.fillText('男', cx - 30, y + RH / 2); g.fillText('女', cx + 30, y + RH / 2);
-    if (sx) { g.lineWidth = 3; g.beginPath(); g.arc(cx + (sx === '男' ? -30 : 30), y + RH / 2, 24, 0, Math.PI * 2); g.stroke(); }
+    g.font = `40px ${F}`; g.fillText("男", cx - 36, y + RH / 2); g.fillText("女", cx + 36, y + RH / 2);
+    if (sx) { g.lineWidth = 3; g.beginPath(); g.arc(cx + (sx === "男" ? -36 : 36), y + RH / 2, 28, 0, Math.PI * 2); g.stroke(); }
   });
   const yEnd = TOP + RH * (rows.length + 1);
   for (let k = 0; k <= rows.length + 1; k++) {
@@ -166,10 +166,42 @@ function manifestImage() {
     line(X0, y, X0 + TW, y, thick ? 4 : 2);
   }
   xs.forEach((x, i) => line(x, TOP, x, yEnd, i === 0 || i === xs.length - 1 ? 4 : 2));
-  c.toBlob(b => {
-    const d = new Date(), stamp = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
-    const file = new File([b], `manifest_${stamp}.png`, { type: 'image/png' });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) navigator.share({ files: [file], title }).catch(() => {});
-    else { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = file.name; a.click(); }
-  }, 'image/png');
+  return { canvas: c, title };
+}
+const stampToday = () => { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`; };
+function shareFile(blob, name, type, title) {
+  const file = new File([blob], name, { type });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) return navigator.share({ files: [file], title }).catch(() => {});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+}
+function manifestImage() {
+  const { canvas, title } = renderManifestCanvas();
+  canvas.toBlob(b => shareFile(b, `manifest_${stampToday()}.png`, 'image/png', title), 'image/png');
+}
+
+// 自己組一個 A4 PDF（把名單圖放進去），iPhone 主畫面 app 不能用網頁列印，所以改用分享
+function manifestPdf() {
+  const { canvas, title } = renderManifestCanvas();
+  canvas.toBlob(async b => {
+    const jpg = new Uint8Array(await b.arrayBuffer());
+    const PW = 595.28, PH = 841.89, M = 28;
+    const s = Math.min((PW - 2*M) / canvas.width, (PH - 2*M) / canvas.height);
+    const w = canvas.width * s, h = canvas.height * s, x = (PW - w) / 2, y = PH - M - h;
+    const enc = new TextEncoder(), parts = [], offs = [];
+    let len = 0;
+    const push = p => { const u = typeof p === 'string' ? enc.encode(p) : p; parts.push(u); len += u.length; };
+    const obj = (n, body) => { offs[n] = len; push(`${n} 0 obj\n`); body(); push('\nendobj\n'); };
+    push('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
+    const content = `q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /Im0 Do Q`;
+    obj(1, () => push('<< /Type /Catalog /Pages 2 0 R >>'));
+    obj(2, () => push('<< /Type /Pages /Kids [3 0 R] /Count 1 >>'));
+    obj(3, () => push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PW} ${PH}] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>`));
+    obj(4, () => { push(`<< /Length ${content.length} >>\nstream\n`); push(content); push('\nendstream'); });
+    obj(5, () => { push(`<< /Type /XObject /Subtype /Image /Width ${canvas.width} /Height ${canvas.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpg.length} >>\nstream\n`); push(jpg); push('\nendstream'); });
+    const xref = len;
+    let x2 = 'xref\n0 6\n0000000000 65535 f \n';
+    for (let n = 1; n <= 5; n++) x2 += String(offs[n]).padStart(10, '0') + ' 00000 n \n';
+    push(x2 + `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+    shareFile(new Blob(parts, { type: 'application/pdf' }), `manifest_${stampToday()}.pdf`, 'application/pdf', title);
+  }, 'image/jpeg', 0.92);
 }
