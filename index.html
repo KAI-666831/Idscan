@@ -30,6 +30,30 @@
   #fieldsCard > :not(.field) { order:100; }
   #fieldsCard > button { margin-top:8px; }
   .field label { font-size:13px; color:var(--muted); display:flex; justify-content:space-between; }
+  .field select { width:100%; font-size:18px; padding:10px; border-radius:10px; border:1px solid #ccc; background:transparent; color:var(--fg); margin-top:4px; }
+  .crew-row { display:flex; align-items:center; gap:10px; padding:9px 2px; border-bottom:1px solid rgba(128,128,128,.25); font-size:15px; }
+  .crew-row input { width:22px; height:22px; }
+  .cr-name { flex:1; } .cr-id { color:var(--muted); font-size:13px; }
+  #manifest { position:fixed; inset:0; z-index:25; background:#fff; color:#000; display:none; overflow:auto; }
+  .mf-bar { position:sticky; top:0; display:flex; gap:8px; padding:calc(env(safe-area-inset-top) + 8px) 10px 8px; background:#eee; }
+  .mf-bar button { flex:1; padding:12px 0; font-size:15px; }
+  #mfPage { padding:24px 18px; font-family:"PingFang TC","Noto Serif TC",serif; }
+  .mf-title { text-align:center; font-size:22px; margin-bottom:8px; }
+  table.mf { width:100%; border-collapse:collapse; border:2px solid #000; font-size:15px; }
+  table.mf th, table.mf td { border:1px solid #000; text-align:center; padding:6px 3px; height:26px; color:#000; }
+  table.mf tbody.pax { border-top:3px solid #000; }
+  table.mf td.sm { font-size:11px; } table.mf td.bd { white-space:nowrap; }
+  .circ { border:1.5px solid #000; border-radius:50%; padding:0 3px; }
+  @media print {
+    body > *:not(#manifest) { display:none !important; }
+    #manifest { position:static; display:block !important; overflow:visible; }
+    .mf-bar { display:none !important; }
+    #mfPage { padding:0; }
+    .mf-title { font-size:18pt; margin-bottom:4mm; }
+    table.mf { font-size:11pt; }
+    table.mf th, table.mf td { height:6.6mm; padding:0 2px; }
+    @page { size:A4 portrait; margin:10mm 12mm; }
+  }
   .field input { width:100%; font-size:18px; padding:10px; border-radius:10px; border:1px solid #ccc;
          background:transparent; color:var(--fg); margin-top:4px; }
   .ok { color:var(--ok); } .bad { color:var(--bad); }
@@ -86,7 +110,7 @@
 </head>
 <body>
 <h1>身分證辨識</h1>
-<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/12-f</span></div>
+<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/12-g</span></div>
 
 <div class="card">
   <div id="types" class="seg">
@@ -107,6 +131,8 @@
 <div class="card" id="fieldsCard">
   <div class="field" data-f="name"><label><span class="lb">姓名</span></label><input id="name" autocomplete="off"></div>
   <div class="field" data-f="nameEn"><label><span class="lb">英文姓名</span></label><input id="nameEn" autocomplete="off" autocapitalize="characters"></div>
+  <div class="field" data-f="sex"><label><span class="lb">性別</span></label>
+    <select id="sex"><option value=""></option><option>男</option><option>女</option></select></div>
   <div class="field" data-f="birth"><label><span class="lb">出生日期</span><span id="birthAd"></span></label><input id="birth" autocomplete="off"></div>
   <div class="field" data-f="idno"><label><span class="lb">身分證字號</span> <span id="idCheck"></span></label>
     <input id="idno" autocomplete="off" autocapitalize="characters" oninput="checkId()"></div>
@@ -115,7 +141,31 @@
   <div class="field" data-f="docno"><label><span class="lb">手冊號碼</span></label><input id="docno" autocomplete="off" autocapitalize="characters"></div>
   <button onclick="openConfirm()">👤 給客人確認</button>
   <button class="sec" onclick="saveRecord()">直接儲存（不確認）</button>
+  <button class="sec" onclick="addFormToCrew()">⚓ 加入船員名冊</button>
   <details><summary>辨識原文（除錯用）</summary><pre id="raw"></pre></details>
+</div>
+
+<div class="card">
+  <b>出港名單</b>
+  <div class="field"><label>船名</label><input id="shipName" placeholder="例：大益娛樂漁船(CT3-6283)"></div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
+    <b style="font-size:15px">船員名冊 <span id="crewCount">0</span> 人・今天出海 <span id="crewToday">0</span> 人</b>
+    <span style="font-size:13px"><a href="#" onclick="crewAll(true);return false">全選</a>｜<a href="#" onclick="crewAll(false);return false">全不選</a></span>
+  </div>
+  <div id="crewList"></div>
+  <label class="crew-row" style="border:0"><input type="checkbox" id="incPax" checked> 下方乘客欄放入已儲存的資料（<span id="paxCount">0</span> 筆）</label>
+  <button onclick="openManifest()">📋 產生進出港人員名單</button>
+  <button class="sec" onclick="document.getElementById('crewFile').click()">匯入船員名冊檔（CSV）</button>
+  <input id="crewFile" type="file" accept=".csv,text/csv" onchange="importCrew(this.files[0]);this.value=''">
+</div>
+
+<div id="manifest">
+  <div class="mf-bar">
+    <button class="sec" onclick="closeManifest()">關閉</button>
+    <button onclick="window.print()">列印／存 PDF</button>
+    <button onclick="manifestImage()">存成圖片</button>
+  </div>
+  <div id="mfPage"></div>
 </div>
 
 <div class="card">
@@ -184,23 +234,24 @@
 <script src="docs.js"></script>
 <script src="qrcode.js"></script>
 <script src="pair.js"></script>
+<script src="crew.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const CARD = 85.6/54, BOOK = 125/88;
 // 每種證件：取景框比例、要顯示的欄位與標題、生日格式（roc=民國 / ad=西元）
 const TYPES = {
   id:       { label:'身分證', ratio:CARD, scan:'📷 掃描身分證正面', hint:'把身分證正面對準綠框，填滿框框、避開反光', date:'roc',
-              f:{ name:'姓名', birth:'出生年月日（民國）', idno:'身分證字號' } },
+              f:{ name:'姓名', sex:'性別', birth:'出生年月日（民國）', idno:'身分證字號' } },
   arc:      { label:'居留證', ratio:CARD, scan:'📷 掃描居留證正面', hint:'把居留證正面對準綠框，避開雷射貼紙反光', date:'ad',
-              f:{ nameEn:'英文姓名', ppno:'護照號碼', birth:'出生日期（西元）', nat:'國籍', idno:'統一證號', name:'中文姓名' } },
+              f:{ nameEn:'英文姓名', ppno:'護照號碼', sex:'性別', birth:'出生日期（西元）', nat:'國籍', idno:'統一證號', name:'中文姓名' } },
   passport: { label:'護照',   ratio:BOOK, scan:'📷 掃描護照資料頁', hint:'對準有照片的那一頁，最下面兩行英數字要拍進去', date:'ad',
-              f:{ nameEn:'英文姓名', ppno:'護照號碼', birth:'出生日期（西元）', nat:'國籍', name:'中文姓名', idno:'身分證字號（台灣護照）' } },
+              f:{ nameEn:'英文姓名', ppno:'護照號碼', sex:'性別', birth:'出生日期（西元）', nat:'國籍', name:'中文姓名', idno:'身分證字號（台灣護照）' } },
   seaman:   { label:'船員證', ratio:BOOK, scan:'📷 掃描船員服務手冊', hint:'對準有照片、姓名、生日的那一頁', date:'roc',
-              f:{ name:'姓名', birth:'出生日期（民國）', idno:'身分證字號', docno:'手冊號碼' } },
+              f:{ name:'姓名', sex:'性別', birth:'出生日期（民國）', idno:'身分證字號', docno:'手冊號碼' } },
   nhi:      { label:'健保卡', ratio:CARD, scan:'📷 掃描健保卡正面', hint:'把健保卡正面對準綠框', date:'roc',
-              f:{ name:'姓名', nameEn:'英文姓名', birth:'出生日期（民國）', idno:'身分證／居留證號' } }
+              f:{ name:'姓名', nameEn:'英文姓名', sex:'性別', birth:'出生日期（民國）', idno:'身分證／居留證號' } }
 };
-const ALL_F = ['name','nameEn','birth','idno','ppno','nat','docno'];
+const ALL_F = ['name','nameEn','sex','birth','idno','ppno','nat','docno'];
 // 護照、居留證以英文姓名＋護照號碼為主；其他證件以中文姓名＋身分證號為主
 const EN_FIRST = t => t === 'passport' || t === 'arc';
 const primaryName = r => (EN_FIRST(r.type) ? (r.nameEn || r.name) : (r.name || r.nameEn)) || '';
@@ -481,6 +532,10 @@ async function runGeneric(card, log) {
   if (g && g !== docType && g !== 'id') setType(g);
   const r = await ({ arc:parseArc, passport:parsePassportLines, seaman:parseSeaman, nhi:parseNhi })[docType](lines, card);
   for (const k of ALL_F) if (r[k] && TYPES[docType].f[k]) $(k).value = r[k];
+  if (!$('sex').value) {
+    const all = lines.map(L => L.t).join(' ');
+    $('sex').value = r.sex || inferSex({ idno: $('idno').value }) || (/女|Female/i.test(all) ? '女' : /男|Male/i.test(all) ? '男' : '');
+  }
   checkId();
   if (docType === 'passport' && r.mrz) { $('ppCheck').textContent = '✓ MRZ 檢查碼正確'; $('ppCheck').className = 'ok'; }
   $('birthAd').textContent = TYPES[docType].date === 'roc' ? rocToAd($('birth').value) : '';
@@ -520,7 +575,7 @@ async function runOcr(card) {
       }
       if (k >= 2 && topVote(ids)?.[1] >= 3 && topVote(names)?.[1] >= 3 && topVote(births)?.[1] >= 3) break;
     }
-    $('idno').value = topVote(ids)?.[0] || ''; checkId();
+    $('idno').value = topVote(ids)?.[0] || ''; checkId(); $('sex').value = inferSex({ idno: $('idno').value });
     $('name').value = topVote(names)?.[0] || '';
     $('birth').value = topVote(births)?.[0] || '';
     $('birthAd').textContent = rocToAd($('birth').value);
@@ -554,7 +609,7 @@ const store = a => { try { localStorage.setItem(KEY, JSON.stringify(a)); } catch
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
 function render() {
   const a = load();
-  $('count').textContent = a.length;
+  $('count').textContent = a.length; if ($('paxCount')) $('paxCount').textContent = a.length;
   $('list').tBodies[0].innerHTML = a.map((r,i) =>
     `<tr><td>${esc(TYPES[r.type||'id']?.label||'')}</td><td>${esc(primaryName(r))}</td><td>${esc(r.birth)}</td><td>${esc(primaryNo(r))}</td><td>${r.confirmed ? '<span class="ck">✓</span>' : ''}</td><td><a href="#" onclick="del(${i});return false">刪</a></td></tr>`).join('');
 }
@@ -641,6 +696,8 @@ function exportCsv() {
 }
 setType('id');
 render();
+try { $('shipName').value = localStorage.getItem(SHIP_KEY) || '大益娛樂漁船(CT3-6283)'; } catch {}
+renderCrew();
 const dispPair = displayMode();
 if (dispPair) dispStart(dispPair);            // 這支是副機：只顯示客人確認畫面
 else {

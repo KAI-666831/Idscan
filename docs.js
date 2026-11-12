@@ -149,7 +149,7 @@ function parsePassportLines(lines) {
   const r = {};
   const ts = lines.map(L => L.t.toUpperCase().replace(/\s/g,'').replace(/[>«‹]/g,'<'));
   for (const t of ts) { const m2 = parseMrz2(t); if (m2) { r.ppno = m2.doc; r.nat = m2.nat; r.birth = m2.dob;
-    const tw = m2.opt.match(/[A-Z][12]\d{8}/); if (tw && validId(tw[0])) r.idno = tw[0]; r.mrz = true; break; } }
+    const tw = m2.opt.match(/[A-Z][12]\d{8}/); if (tw && validId(tw[0])) r.idno = tw[0]; r.mrz = true; r.sex = m2.sex === 'F' ? '女' : m2.sex === 'M' ? '男' : ''; break; } }
   for (const t of ts) { const u = t.replace(/^P[^A-Z<]/, 'P<'); if (!/^P[A-Z<]/.test(u) || !/<</.test(u)) continue;
     const m1 = parseMrz1(u); if (m1) { r.nameEn = m1.name; break; } }
   const tw = r.nat === 'TWN' || lines.some(L => /REPUBLIC\s*OF\s*CHINA|中華民國/i.test(L.t));
