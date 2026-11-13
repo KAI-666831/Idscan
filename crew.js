@@ -169,14 +169,17 @@ function renderManifestCanvas() {
   return { canvas: c, title };
 }
 const stampToday = () => { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`; };
+// 檔名：2026-11-14_0407_出船乘客名單
+const manifestName = ext => { const d = new Date(), p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}_出船乘客名單.${ext}`; };
 function shareFile(blob, name, type, title) {
   const file = new File([blob], name, { type });
-  if (navigator.canShare && navigator.canShare({ files: [file] })) return navigator.share({ files: [file], title }).catch(() => {});
+  if (navigator.canShare && navigator.canShare({ files: [file] })) return navigator.share({ files: [file] }).catch(() => {});   // 只分享檔案；加標題 iPhone 會多存一個「文字」檔
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
 }
 function manifestImage() {
   const { canvas, title } = renderManifestCanvas();
-  canvas.toBlob(b => shareFile(b, `manifest_${stampToday()}.png`, 'image/png', title), 'image/png');
+  canvas.toBlob(b => shareFile(b, manifestName('png'), 'image/png', title), 'image/png');
 }
 
 // 自己組一個 A4 PDF（把名單圖放進去），iPhone 主畫面 app 不能用網頁列印，所以改用分享
@@ -202,6 +205,6 @@ function manifestPdf() {
     let x2 = 'xref\n0 6\n0000000000 65535 f \n';
     for (let n = 1; n <= 5; n++) x2 += String(offs[n]).padStart(10, '0') + ' 00000 n \n';
     push(x2 + `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
-    shareFile(new Blob(parts, { type: 'application/pdf' }), `manifest_${stampToday()}.pdf`, 'application/pdf', title);
+    shareFile(new Blob(parts, { type: 'application/pdf' }), manifestName('pdf'), 'application/pdf', title);
   }, 'image/jpeg', 0.92);
 }
