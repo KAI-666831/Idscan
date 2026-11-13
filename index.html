@@ -115,7 +115,7 @@
 </head>
 <body>
 <h1>身分證辨識</h1>
-<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/14-l</span></div>
+<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/14-m</span></div>
 
 <div class="card">
   <div id="types" class="seg">
@@ -150,6 +150,14 @@
   <button class="sec" onclick="saveRecord()">直接儲存（不確認）</button>
   <button class="sec" onclick="addFormToCrew()">⚓ 加入船員名冊</button>
   <details><summary>辨識原文（除錯用）</summary><pre id="raw"></pre></details>
+</div>
+
+<div class="card">
+  <b>辨識樣本（除錯用）</b>
+  <label class="crew-row" style="border:0"><input type="checkbox" id="sampleOn" onchange="try{localStorage.setItem('idscan_samples_on', this.checked ? '1' : '0')}catch{}"> 自動保存每次辨識的證件畫面（最近 80 張，只存在這支手機）</label>
+  <div style="font-size:14px;margin-bottom:6px">目前 <b id="sampleCount">0</b> 張</div>
+  <button class="sec" onclick="exportSamples()">匯出樣本 ZIP（傳給開發者）</button>
+  <button class="danger" onclick="clearSamples()">刪除所有樣本</button>
 </div>
 
 <div class="card">
@@ -251,6 +259,7 @@
 <script src="pair.js"></script>
 <script src="crew.js"></script>
 <script src="cont.js"></script>
+<script src="samples.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const CARD = 85.6/54, BOOK = 125/88;
@@ -576,8 +585,6 @@ function positionalName(reads) {
     }
     return c.ch;
   });
-  // 前面多一個字（「姓名」標籤被讀成「共」「甲」）：4 個字、第一個不是常見姓、第二個是，就去掉第一個
-  if (pick.length === 4 && !COMMON_SURNAMES.includes(pick[0]) && COMMON_SURNAMES.includes(pick[1])) pick = pick.slice(1);
   return pick.join('');
 }
 // 至少讀 9 次，而且最近兩次算出來的名字一樣才停
@@ -676,7 +683,8 @@ async function runOcr(card) {
       if (!nameStable(nameReads)) {
         const cs = await recRegion(card, 0.0+dx, 0.40+dy, 0.70+dx, 0.62+dy, true);
         // 每個字換算成在證件上的橫向位置（0~1），之後逐字依位置投票
-        const li = cs.map(c => c.ch).lastIndexOf('名');
+        const raw = cs.map(c => c.ch).join('');
+        const li = /[年月]|民國/.test(raw) ? cs.length : cs.map(c => c.ch).lastIndexOf('名');   // 框到下一行生日（有年、月）就不算
         const rd = cs.slice(li + 1).filter(c => /[\u4e00-\u9fff]/.test(c.ch))
           .map(c => ({ X: (0.0 + dx) + c.x * 0.70, ch: c.ch })).filter(c => c.X > 0.15);
         nameReads.push(rd);
@@ -701,6 +709,8 @@ async function runOcr(card) {
   }
   $('raw').textContent = log.join('\n');
   $('prog').style.display = 'none';
+  const res = {}; ALL_F.forEach(k => { if ($(k).value) res[k] = $(k).value; });
+  saveSample(card, log, res);
 }
 
 function rocToAd(s) {
@@ -829,6 +839,7 @@ setType('id');
 render();
 try { $('shipName').value = localStorage.getItem(SHIP_KEY) || '大益娛樂漁船(CT3-6283)'; } catch {}
 renderCrew();
+renderSamples();
 const dispPair = displayMode();
 if (dispPair) dispStart(dispPair);            // 這支是副機：只顯示客人確認畫面
 else {
