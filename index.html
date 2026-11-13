@@ -115,7 +115,7 @@
 </head>
 <body>
 <h1>身分證辨識</h1>
-<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/14-g</span></div>
+<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/14-i</span></div>
 
 <div class="card">
   <div id="types" class="seg">
@@ -523,6 +523,52 @@ async function recRegion(card, x0, y0, x1, y1, withPos) {
 
 // 身分證姓名：名字是平均分散排的；右邊直排防偽小字會緊貼在最後一個字旁，被讀成「具、目、息…」
 // 用字和字的間距判斷：最後一個字離前一個字太近就去掉
+// 逐字依位置投票：真正的名字每次都出現在同樣位置；表格線碎片（一、三）偶爾才出現、位置也不固定
+const LINE_JUNK = '一二三丨|—－_';
+function positionalName(reads) {
+  const R = reads.length; if (!R) return '';
+  const all = []; reads.forEach((rd, i) => rd.forEach(c => all.push({ ...c, r: i })));
+  all.sort((a, b) => a.X - b.X);
+  const cl = [];
+  for (const c of all) {
+    const last = cl[cl.length - 1];
+    if (last && c.X - last.end <= 0.035) { last.items.push(c); last.end = c.X; } else cl.push({ items: [c], end: c.X });
+  }
+  // 每個位置：幾次讀到（sup）、最多的字、平均位置
+  let cand = cl.map((g, gi) => {
+    const byRead = new Map(); g.items.forEach(c => { if (!byRead.has(c.r)) byRead.set(c.r, c.ch); });
+    const cnt = {}; for (const ch of byRead.values()) cnt[ch] = (cnt[ch] || 0) + 1;
+    const ent = Object.entries(cnt).sort((a, b) => b[1] - a[1]);
+    const X = g.items.reduce((s, c) => s + c.X, 0) / g.items.length;
+    return { X, sup: byRead.size, cnt, ch: ent[0][0] };
+  }).filter(c => c.sup >= Math.max(1, Math.ceil(R * 0.2)));
+  if (cand.length > 8) cand = cand.sort((a, b) => b.sup - a.sup).slice(0, 8).sort((a, b) => a.X - b.X);
+  // 挑「間距平均」而且總票數最高的 2~4 個字（名字一定是平均分散排的）
+  let best = null;
+  const n = cand.length;
+  for (let mask = 1; mask < (1 << n); mask++) {
+    const pick = cand.filter((_, i) => mask & (1 << i));
+    if (pick.length < 2 || pick.length > 4) continue;
+    const gaps = []; for (let i = 1; i < pick.length; i++) gaps.push(pick[i].X - pick[i-1].X);
+    if (Math.min(...gaps) < 0.08) continue;
+    if (pick.length > 2 && Math.max(...gaps) / Math.min(...gaps) > 1.45) continue;
+    let score = pick.reduce((s, c) => s + c.sup - (LINE_JUNK.includes(c.ch) ? R * 0.5 : 0), 0);
+    if (!best || score > best.score) best = { score, pick };
+  }
+  if (!best) return '';
+  return best.pick.map((c, i) => {
+    if (i === 0) {   // 第一個字（姓）：候選裡有常見姓氏就優先，例如「全」「干」多半是「王」誤讀
+      const common = Object.entries(c.cnt).filter(([ch]) => COMMON_SURNAMES.includes(ch)).sort((a, b) => b[1] - a[1])[0];
+      if (common && !COMMON_SURNAMES.includes(c.ch)) return common[0];
+    }
+    return c.ch;
+  }).join('');
+}
+// 至少讀 9 次，而且最近兩次算出來的名字一樣才停
+function nameStable(reads) {
+  if (reads.length < 9) return false;
+  return positionalName(reads) === positionalName(reads.slice(0, -1)) && positionalName(reads).length >= 2;
+}
 function nameFromChars(chars) {
   const isCJK = c => /[\u4e00-\u9fff]/.test(c);
   let i = chars.findIndex(c => c.ch === '名');
@@ -605,7 +651,7 @@ async function runOcr(card) {
     $('prog').style.display = 'block';
     if (docType !== 'id') { await runGeneric(card, log); }
     else {
-    const ids = {}, names = {}, births = {};
+    const ids = {}, births = {}, nameReads = [];
     for (let k = 0; k < OFFSETS.length; k++) {
       const [dx, dy] = OFFSETS[k];
       $('status').textContent = `辨識中… ${k+1}/${OFFSETS.length}`; $('prog').value = (k+1)/OFFSETS.length;
@@ -613,10 +659,14 @@ async function runOcr(card) {
         const t = (await recRegion(card, 0.62+dx, 0.82+dy, 1.0, 0.99+dy)).toUpperCase().replace(/\s/g,''); log.push('號: '+t);
         for (const m of t.match(/[A-Z][0-9]{9}/g) || []) if (validId(m)) add(ids, m);
       }
-      if (!nameDone(names)) {
+      if (!nameStable(nameReads)) {
         const cs = await recRegion(card, 0.0+dx, 0.40+dy, 0.70+dx, 0.62+dy, true);
-        const nm = nameFromChars(cs); log.push('名: ' + cs.map(c => c.ch).join('') + ' → ' + nm);
-        if (nm.length >= 2) add(names, nm);
+        // 每個字換算成在證件上的橫向位置（0~1），之後逐字依位置投票
+        const li = cs.map(c => c.ch).lastIndexOf('名');
+        const rd = cs.slice(li + 1).filter(c => /[\u4e00-\u9fff]/.test(c.ch))
+          .map(c => ({ X: (0.0 + dx) + c.x * 0.70, ch: toTrad(TO_TRAD[c.ch] || c.ch) })).filter(c => c.X > 0.15);
+        nameReads.push(rd);
+        log.push('名: ' + cs.map(c => c.ch).join('') + ' → ' + rd.map(c => c.ch + '@' + c.X.toFixed(2)).join(' '));
       }
       if (!(topVote(births)?.[1] >= 3)) {
         const t = (await recRegion(card, 0.10+dx, 0.62+dy, 0.68+dx, 0.82+dy)).replace(/\s/g,''); log.push('生: '+t);
@@ -624,10 +674,10 @@ async function runOcr(card) {
         if (m && birthOk('id', `${+m[1]}/${m[2]}/${m[3]}`))
           add(births, `${+m[1]}/${m[2].padStart(2,'0')}/${m[3].padStart(2,'0')}`);
       }
-      if (k >= 2 && topVote(ids)?.[1] >= 3 && nameDone(names) && topVote(births)?.[1] >= 3) break;
+      if (k >= 2 && topVote(ids)?.[1] >= 3 && nameStable(nameReads) && topVote(births)?.[1] >= 3) break;
     }
     $('idno').value = topVote(ids)?.[0] || ''; checkId(); $('sex').value = inferSex({ idno: $('idno').value });
-    $('name').value = toTrad(pickName(names));
+    $('name').value = positionalName(nameReads);
     $('birth').value = topVote(births)?.[0] || '';
     $('birthAd').textContent = rocToAd($('birth').value);
     $('status').textContent = '完成，請核對後儲存。空白或有錯的欄位可直接修改。';
