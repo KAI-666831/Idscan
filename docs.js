@@ -73,7 +73,7 @@ function findIds(lines) {                     // 身分證 / 居留證 / 統一�
 const LABELS = /^(姓名|NAME|出生日期|出生地|性别|性別|身分證號碼|住址|備註|發照日期|有效日期|國籍|男|女|台灣|臺灣|越南|印尼|菲律賓|泰國|外僑居留證|中華民國居留證|居留證)$/;
 const EN_STOP = /^(ARC|NAME|BIRTHDAY|BIRTHPLACE|SEX|ADDRESS|REMARKS|PERMIT|MULTIPLE|RE-ENTRY|MULTIPLERE-ENTRY|MALE|FEMALE|M|F|TAIWAN|TAIPEI|NATIONAL|HEALTH|INSURANCE|NATIONALHEALTHINSURANCE|PASSPORT|REPUBLIC|CHINA|ROC|R\.O\.C\.)$/;
 const isEnName = t => /^[A-Z][A-Z .,'-]*[A-Z]$/.test(t) && !EN_STOP.test(t.replace(/\s/g,'')) && !/[0-9]/.test(t);
-const NATS = ['越南','印尼','菲律賓','泰國','緬甸','馬來西亞','柬埔寨','斯里蘭卡','孟加拉','印度','日本','韓國','美國','中國大陸'];
+const NATS = ['越南','印尼','菲律賓','泰國','緬甸','馬來西亞','柬埔寨','斯里蘭卡','孟加拉','印度','日本','韓國','美國','中國大陸','俄羅斯','烏克蘭','英國','法國','德國','加拿大','澳大利亞','澳洲','紐西蘭','新加坡','香港','澳門','蒙古','尼泊爾','巴基斯坦','南非','巴西','墨西哥','義大利','西班牙','荷蘭','土耳其','寮國','汶萊','東帝汶','吉里巴斯','吐瓦魯','斐濟','索羅門群島','巴拿馬','祕魯','智利','阿根廷'];
 const MONTHS = { JAN:1,FEB:2,MAR:3,APR:4,MAY:5,JUN:6,JUL:7,AUG:8,SEP:9,OCT:10,NOV:11,DEC:12 };
 
 // ---------- 居留證 ----------
@@ -84,11 +84,29 @@ function parseArc(lines) {
   for (const L of lines) for (const m of L.t.matchAll(/((?:19|20)\d{2})[\/.-](\d{1,2})[\/.-](\d{1,2})/g))
     dates.push(`${m[1]}-${pad2(m[2])}-${pad2(m[3])}`);
   dates.sort(); if (dates.length) r.birth = dates[0];          // 生日一定最早（早於核發日、到期日）
-  for (const L of lines) {
-    const t = L.t.toUpperCase().replace(/[^A-Z0-9]/g, '');
-    if (/^[A-Z]{1,2}\d{6,8}$/.test(t) && t !== r.idno && !/^\d+$/.test(t)) { r.ppno = t; break; }
+  // 護照號碼：先找「護照號碼 Passport No.」標籤正下方那一行（有些國家全是數字，例如俄羅斯 759411029）
+  const pl = lines.find(L => /PASSPORT|護照|照號|號碼/i.test(L.t) && !/\d{5}/.test(L.t));
+  const norm = L => L.t.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const okNo = t => /^[A-Z0-9]{6,10}$/.test(t) && /\d{5}/.test(t) && t !== r.idno && !/^(19|20)\d{6}$/.test(t);
+  if (pl) {
+    const below = lines.filter(L => L !== pl && L.cy > pl.cy && L.cy < pl.cy + 0.12 && L.x1 > pl.x0 - 0.05 && L.x0 < pl.x1 + 0.1 && okNo(norm(L)))
+      .sort((a, b) => a.cy - b.cy);
+    if (below.length) r.ppno = norm(below[0]);
   }
+  if (!r.ppno) for (const L of lines) {
+    const t = norm(L);
+    if (/^[A-Z]{1,2}\d{6,8}$/.test(t) && t !== r.idno) { r.ppno = t; break; }
+  }
+  // 國籍：已知國名，或「國籍 Nationality」下方的中文，或三碼國家代號（例如 RUS）
   r.nat = NATS.find(n => lines.some(L => L.t.includes(n))) || '';
+  if (!r.nat) {
+    const nl = lines.find(L => /國籍|國箱|國藉|NATIONAL/i.test(L.t) && !/REPUBLIC/i.test(L.t));
+    if (nl) {
+      const c = lines.filter(L => L !== nl && L.cy > nl.cy - 0.02 && L.cy < nl.cy + 0.1 && L.x1 > nl.x0 - 0.05 && L.x0 < nl.x1 + 0.15)
+        .find(L => /^[\u4e00-\u9fff]{2,5}$/.test(L.t) || /^[A-Z]{3}$/.test(L.t.trim()) && L.t.trim() !== 'ARC');
+      if (c) r.nat = c.t.trim();
+    }
+  }
   // 英文姓名：統一證號下方、出生日期上方，左半邊的大寫英文
   const idL = ids[0]?.L, birthLbl = lines.find(L => /出生日期|Date.?of.?b/i.test(L.t));
   const top = idL ? idL.cy : 0, bottom = birthLbl ? birthLbl.cy : (idL ? idL.cy + 0.25 : 1);

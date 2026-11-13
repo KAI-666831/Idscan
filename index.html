@@ -110,7 +110,7 @@
 </head>
 <body>
 <h1>身分證辨識</h1>
-<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/12-i</span></div>
+<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/14-a</span></div>
 
 <div class="card">
   <div id="types" class="seg">
@@ -506,6 +506,17 @@ async function recRegion(card, x0, y0, x1, y1) {
 
 const OFFSETS = [[0,0],[0,-0.02],[0,0.02],[-0.02,0],[0.02,0],[0,-0.04],[0,0.04],[-0.02,-0.02],[0.02,0.02]];
 const TO_TRAD = { '黄':'黃','颖':'穎','华':'華','国':'國','伟':'偉','杰':'傑','俊':'俊','丽':'麗','婷':'婷','军':'軍','龙':'龍','刘':'劉','陈':'陳','张':'張','吴':'吳','郑':'鄭','许':'許','谢':'謝','罗':'羅','叶':'葉','苏':'蘇','庄':'莊','钟':'鍾','赖':'賴','杨':'楊','萧':'蕭','邓':'鄧','冯':'馮','韩':'韓','贺':'賀','卢':'盧','顾':'顧','汤':'湯' };
+// 常見姓氏：票數一樣時，第一個字是常見姓的優先（例如「王」比「全」）
+const COMMON_SURNAMES = '陳林黃張李王吳劉蔡楊許鄭謝洪郭邱曾廖賴徐周葉蘇莊呂江何蕭羅高潘簡朱鍾游彭詹胡施沈余盧梁趙顏柯翁魏孫戴范方宋鄧杜傅侯曹薛丁卓阮馬董溫唐藍石蔣古紀姚連馮歐程湯田康姜白汪鄒尤巫鐘黎涂龔嚴韓袁金童陸夏柳凃邵錢伍倪于譚駱熊任甘秦顧毛章史官萬俞雷粘饒闕凌崔尹孔辛武辜陶段龍韋葛池孟褚殷麥賀賈莫';
+const NAME_JUNK = '具目且貝旦日自皿！!|丨';
+function rankNames(votes) {
+  const ks = Object.keys(votes);
+  const score = k => ks.reduce((n, j) => n + (k.includes(j) ? votes[j] : 0), 0) + (COMMON_SURNAMES.includes(k[0]) ? 0.5 : 0);
+  return ks.map(k => [k, score(k)]).sort((a, b) => b[1] - a[1] || (b[0].length === 3) - (a[0].length === 3));
+}
+function pickName(votes) { const r = rankNames(votes); return r.length ? r[0][0] : ''; }
+// 姓名要明顯領先才停（避免「全子悠」先到 3 票就搶走「王子悠」）
+function nameDone(votes) { const r = rankNames(votes); return r.length && r[0][1] >= 3 && r[0][1] - (r[1] ? r[1][1] : 0) >= 2; }
 const topVote = c => { const e = Object.entries(c).sort((a,b) => b[1]-a[1]); return e.length ? e[0] : null; };
 const add = (c, k) => c[k] = (c[k]||0) + 1;
 
@@ -563,10 +574,14 @@ async function runOcr(card) {
         const t = (await recRegion(card, 0.62+dx, 0.82+dy, 1.0, 0.99+dy)).toUpperCase().replace(/\s/g,''); log.push('號: '+t);
         for (const m of t.match(/[A-Z][0-9]{9}/g) || []) if (validId(m)) add(ids, m);
       }
-      if (!(topVote(names)?.[1] >= 3)) {
+      if (!nameDone(names)) {
         const t = (await recRegion(card, 0.0+dx, 0.40+dy, 0.70+dx, 0.62+dy)).replace(/\s/g,''); log.push('名: '+t);
         const m = t.match(/名([一-鿿]{2,4})/) || t.match(/([一-鿿]{2,4})$/);
-        if (m) add(names, [...m[1]].map(ch => TO_TRAD[ch] || ch).join(''));
+        if (m) {
+          let nm = [...m[1]].map(ch => TO_TRAD[ch] || ch).join('');
+          if (nm.length === 4 && NAME_JUNK.includes(nm[3])) nm = nm.slice(0, 3);   // 名字右邊直排防偽小字會被讀成「具」「目」
+          if (nm.length >= 2) add(names, nm);
+        }
       }
       if (!(topVote(births)?.[1] >= 3)) {
         const t = (await recRegion(card, 0.10+dx, 0.62+dy, 0.68+dx, 0.82+dy)).replace(/\s/g,''); log.push('生: '+t);
@@ -574,10 +589,10 @@ async function runOcr(card) {
         if (m && +m[2] >= 1 && +m[2] <= 12 && +m[3] >= 1 && +m[3] <= 31)
           add(births, `${+m[1]}/${m[2].padStart(2,'0')}/${m[3].padStart(2,'0')}`);
       }
-      if (k >= 2 && topVote(ids)?.[1] >= 3 && topVote(names)?.[1] >= 3 && topVote(births)?.[1] >= 3) break;
+      if (k >= 2 && topVote(ids)?.[1] >= 3 && nameDone(names) && topVote(births)?.[1] >= 3) break;
     }
     $('idno').value = topVote(ids)?.[0] || ''; checkId(); $('sex').value = inferSex({ idno: $('idno').value });
-    $('name').value = topVote(names)?.[0] || '';
+    $('name').value = pickName(names);
     $('birth').value = topVote(births)?.[0] || '';
     $('birthAd').textContent = rocToAd($('birth').value);
     $('status').textContent = '完成，請核對後儲存。空白或有錯的欄位可直接修改。';
