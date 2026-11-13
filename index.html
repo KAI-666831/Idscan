@@ -22,7 +22,7 @@
   input[type=file] { display:none; }
   canvas#cardView { width:100%; border-radius:10px; margin-top:10px; display:none; }
   .seg { display:flex; gap:6px; margin-bottom:10px; }
-  .seg button { flex:1; padding:10px 0; font-size:14px; background:transparent; color:var(--accent); border:1px solid var(--accent); }
+  .seg button { flex:1; padding:10px 0; font-size:13px; min-width:0; background:transparent; color:var(--accent); border:1px solid var(--accent); }
   .seg button.on { background:var(--accent); color:#fff; }
   .field { margin:10px 0; }
   .hide { display:none !important; }
@@ -110,7 +110,7 @@
 </head>
 <body>
 <h1>身分證辨識</h1>
-<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/14-a</span></div>
+<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/14-b</span></div>
 
 <div class="card">
   <div id="types" class="seg">
@@ -119,6 +119,7 @@
     <button data-t="passport">護照</button>
     <button data-t="seaman">船員證</button>
     <button data-t="nhi">健保卡</button>
+    <button data-t="dl">駕照</button>
   </div>
   <button id="scanBtn" onclick="openCamera()">📷 掃描身分證正面</button>
   <button class="sec" onclick="document.getElementById('pick').click()">從相簿選擇</button>
@@ -250,7 +251,9 @@ const TYPES = {
   seaman:   { label:'船員證', ratio:BOOK, scan:'📷 掃描船員服務手冊', hint:'對準有照片、姓名、生日的那一頁', date:'roc',
               f:{ name:'姓名', sex:'性別', birth:'出生日期（民國）', idno:'身分證字號', docno:'手冊號碼' } },
   nhi:      { label:'健保卡', ratio:CARD, scan:'📷 掃描健保卡正面', hint:'把健保卡正面對準綠框', date:'roc',
-              f:{ name:'姓名', nameEn:'英文姓名', sex:'性別', birth:'出生日期（民國）', idno:'身分證／居留證號' } }
+              f:{ name:'姓名', nameEn:'英文姓名', sex:'性別', birth:'出生日期（民國）', idno:'身分證／居留證號' } },
+  dl:       { label:'駕照',   ratio:CARD, scan:'📷 掃描駕照正面', hint:'把駕照正面對準綠框，避開護貝反光', date:'roc',
+              f:{ name:'姓名', sex:'性別', birth:'出生日期（民國）', idno:'身分證字號（駕照號碼）' } }
 };
 const ALL_F = ['name','nameEn','sex','birth','idno','ppno','nat','docno'];
 // 護照、居留證以英文姓名＋護照號碼為主；其他證件以中文姓名＋身分證號為主
@@ -530,6 +533,7 @@ function guessType(lines) {
   const all = lines.map(L => L.t).join(' ');
   if (/居留|Resident|ARC\b/i.test(all)) return 'arc';
   if (/健康保|HEALTH\s*INS/i.test(all)) return 'nhi';
+  if (/駕駛執照|駕照號碼|交通部製發/.test(all)) return 'dl';
   if (/<<|PASSPORT|護照號|HO\s*CHIEU/i.test(all)) return 'passport';
   if (/BIRTHPLACE|身分證號碼|出生地/i.test(all)) return 'seaman';
   if (/國民身分證/.test(all)) return 'id';
@@ -542,7 +546,7 @@ async function runGeneric(card, log) {
   lines.forEach(L => log.push(L.t));
   const g = guessType(lines);
   if (g && g !== docType && g !== 'id') setType(g);
-  const r = await ({ arc:parseArc, passport:parsePassportLines, seaman:parseSeaman, nhi:parseNhi })[docType](lines, card);
+  const r = await ({ arc:parseArc, passport:parsePassportLines, seaman:parseSeaman, nhi:parseNhi, dl:parseDl })[docType](lines, card);
   for (const k of ALL_F) if (r[k] && TYPES[docType].f[k]) $(k).value = r[k];
   if (!$('sex').value) {
     const all = lines.map(L => L.t).join(' ');

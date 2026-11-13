@@ -117,6 +117,29 @@ function parseArc(lines) {
   return r;
 }
 
+// ---------- 駕照 ----------
+function parseDl(lines) {
+  const r = {};
+  const ids = findIds(lines); if (ids.length) r.idno = ids[0].v;
+  // 日期格式 055.07.11；出生、有效、發照三個日期裡年份最小的是生日
+  const ds = [];
+  for (const L of lines) {
+    const t = L.t.replace(/\s/g, '');
+    let m = t.match(/^0?(\d{2,3})[.\/](\d{1,2})[.\/](\d{1,2})$/) || t.match(/^0?(\d{2,3})(\d{2})(\d{2})$/);
+    if (m && +m[2] >= 1 && +m[2] <= 12 && +m[3] >= 1 && +m[3] <= 31) ds.push([+m[1], m[2], m[3], L]);
+  }
+  ds.sort((a, b) => a[0] - b[0]);
+  if (ds.length) r.birth = `${ds[0][0]}/${pad2(ds[0][1])}/${pad2(ds[0][2])}`;
+  // 姓名：駕照號碼那一列和出生日期那一列之間的中文
+  const top = ids[0]?.L.cy ?? 0, bottom = ds.length ? ds[0][3].cy : 1;
+  const zh = lines.filter(L => L.cy > top && L.cy < bottom && /^[一-鿿]{2,5}$/.test(L.t)
+    && !/駕|照|號碼|姓名|性別|性别|出生|日期|條件|持照|機車|汽車|交通|種類|中華民國/.test(L.t)).sort((a, b) => a.cy - b.cy);
+  if (zh.length) r.name = zh[0].t;
+  const all = lines.map(L => L.t).join(' ');
+  r.sex = /性.?女|女$/.test(all) ? '女' : /性.?男/.test(all) ? '男' : '';
+  return r;
+}
+
 // ---------- 健保卡 ----------
 function parseNhi(lines) {
   const r = {};
