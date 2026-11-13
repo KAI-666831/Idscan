@@ -1,14 +1,29 @@
 // ===== 連續掃描：證件放好 → 畫面穩定就自動辨識 → 成功嗶一聲存檔 → 移開換下一張 =====
 let cont = null;   // { base, state, prev, still, sig, count, timer, busy }
 
+// 提示音：成功＝高音「嗶嗶」兩聲，失敗＝低音「嗡—嗡」；用方波＋放大，比較大聲
 function beep(ok = true) {
   try {
     const a = cont && cont.audio; if (!a) return;
-    const o = a.createOscillator(), g = a.createGain();
-    o.frequency.value = ok ? 1175 : 330; o.connect(g); g.connect(a.destination);
-    g.gain.setValueAtTime(0.25, a.currentTime); g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + (ok ? 0.18 : 0.35));
-    o.start(); o.stop(a.currentTime + (ok ? 0.18 : 0.35));
+    const comp = a.createDynamicsCompressor(); comp.connect(a.destination);
+    const tone = (freq, start, dur, type) => {
+      const o = a.createOscillator(), g = a.createGain();
+      o.type = type; o.frequency.value = freq; o.connect(g); g.connect(comp);
+      const t = a.currentTime + start;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(1.0, t + 0.01);
+      g.gain.setValueAtTime(1.0, t + dur - 0.03); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.start(t); o.stop(t + dur + 0.02);
+    };
+    if (ok) { tone(1568, 0, 0.12, 'square'); tone(2093, 0.15, 0.18, 'square'); }
+    else { tone(220, 0, 0.28, 'sawtooth'); tone(185, 0.34, 0.38, 'sawtooth'); }
   } catch {}
+  flash(ok);
+}
+// 整個畫面閃一下顏色，吵雜時也看得到
+function flash(ok) {
+  const f = $('contFlash'); if (!f) return;
+  f.style.background = ok ? 'rgba(22,163,74,.45)' : 'rgba(220,38,38,.45)';
+  f.style.opacity = '1'; setTimeout(() => f.style.opacity = '0', 350);
 }
 
 // 取框內畫面的縮圖（灰階 48x30），用來判斷有沒有動、有沒有東西
@@ -28,7 +43,7 @@ const frameStd = a => { let m = 0; for (const x of a) m += x; m /= a.length; let
 
 function recordOk(r) {
   const no = EN_FIRST(r.type) ? (r.ppno && r.ppno.length >= 6) || validId(r.idno || '') : validId(r.idno || '');
-  return !!(no && primaryName(r) && r.birth);
+  return !!(no && primaryName(r) && birthOk(r.type, r.birth));
 }
 
 function contUI(msg, color) {
@@ -38,6 +53,7 @@ function contUI(msg, color) {
 
 async function openContinuous() {
   let audio = null;
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}   // iOS 17+：靜音模式下也發聲
   try { audio = new (window.AudioContext || window.webkitAudioContext)(); await audio.resume(); } catch {}   // 要在按鈕觸發時建立，iPhone 才會出聲
   await openCamera();
   if (!stream) return;
@@ -67,7 +83,7 @@ async function contTick() {
   if (cont.state === 'remove') {                 // 等你把上一張移開
     // 要真的移開（畫面大變、而且連續兩次）才算換下一張，避免手晃一下就重掃
     cont.gone = frameDiff(f, cont.sig) > 28 ? (cont.gone || 0) + 1 : 0;
-    if (cont.gone >= 2) { cont.state = 'seek'; cont.still = 0; cont.seenAt = 0; cont.gone = 0; contUI('放下一張', '#22c55e'); }
+    if (cont.gone >= 2) { cont.state = 'seek'; cont.still = 0; cont.seenAt = 0; cont.gone = 0; cont.cand = null; cont.tries = 0; contUI('放下一張', '#22c55e'); }
     return;
   }
   if (cont.state === 'cool') {                   // 沒讀完整：等畫面變了再試
@@ -95,12 +111,32 @@ async function contTick() {
     }
     if (!cont) return;
     if (recordOk(r)) {
-      const key = primaryNo(r);
-      if (load().some(x => primaryNo(x) === key)) { beep(false); contUI(`已經存過：${primaryName(r)}，請換下一張`, '#eab308'); }
+      r.name = toTrad(r.name);
+      // 號碼要連續讀到兩次一樣才存（檢查碼抓不到 3↔8、0↔6 這類錯）
+      const same = cont.cand && primaryNo(cont.cand) === primaryNo(r) && (cont.cand.birth || '') === (r.birth || '');
+      if (!same) {
+        cont.tries = (cont.tries || 0) + 1;
+        if (cont.tries >= 5) {
+          cont.cand = null; cont.tries = 0; beep(false);
+          contUI('讀了幾次結果都不一樣，請調整角度或改用單張掃描', '#dc2626');
+          cont.state = 'cool'; cont.sig = f; cont.until = Date.now() + 1500; return;
+        }
+        cont.cand = r;
+        contUI(`讀到 ${primaryName(r)}，再確認一次…`, '#3b82f6');
+        cont.seenAt = Date.now() - 2000; cont.still = 0;      // 馬上再讀一次
+        return;
+      }
+      // 兩次一樣：姓名取比較可信的那個（常見姓氏、三個字優先）
+      const nv = {}; [cont.cand, r].forEach(x => { const n = primaryName(x); if (n) nv[n] = (nv[n] || 0) + 1; });
+      if (!EN_FIRST(r.type)) r.name = pickName(nv) || r.name;
+      cont.cand = null; cont.tries = 0;
+      const c = findConflict(r);
+      if (c && c.kind === 'dup') { beep(false); contUI(`${c.msg}，請換下一張`, '#eab308'); }
+      else if (c) { beep(false); contUI(`⚠ ${c.msg}。沒有存檔，請看實體證件，用單張掃描確認`, '#dc2626'); }
       else {
         storeRecord({ ...r, confirmed:false });
         cont.count++; $('contCount').textContent = cont.count;
-        beep(true); contUI(`✓ ${primaryName(r)}　${key}　已存檔，請移開`, '#16a34a');
+        beep(true); contUI(`✓ ${primaryName(r)}　${primaryNo(r)}　已存檔，請移開`, '#16a34a');
       }
       clearFields(); $('cardView').style.display = 'none';
       cont.state = 'remove'; cont.sig = f;

@@ -111,7 +111,10 @@ function parseArc(lines) {
   const idL = ids[0]?.L, birthLbl = lines.find(L => /出生日期|Date.?of.?b/i.test(L.t));
   const top = idL ? idL.cy : 0, bottom = birthLbl ? birthLbl.cy : (idL ? idL.cy + 0.25 : 1);
   const en = lines.filter(L => L.cy > top && L.cy < bottom && L.x0 < 0.5 && isEnName(L.t.toUpperCase()));
-  r.nameEn = en.sort((a,b) => a.x0 - b.x0).map(L => L.t.toUpperCase()).join(' ').replace(/\s+/g,' ').trim();
+  // 只取跟第一段英文姓名同一列的（避免把右邊「Nationality」標籤碎片接進來）
+  const anchor = en.slice().sort((a,b) => b.t.replace(/[^A-Za-z]/g,'').length - a.t.replace(/[^A-Za-z]/g,'').length)[0];
+  const row = anchor ? en.filter(L => L === anchor || (Math.abs(L.cy - anchor.cy) < (anchor.y1 - anchor.y0) * 0.7 && L.x0 < Math.max(0.45, anchor.x1 + 0.05))) : [];
+  r.nameEn = row.sort((a,b) => a.x0 - b.x0).map(L => L.t.toUpperCase()).join(' ').replace(/\s+/g,' ').trim();
   const zh = lines.filter(L => L.cy > top - 0.03 && L.cy < bottom && CJK.test(L.t) && !LABELS.test(L.t) && !/姓名|日期|居留|服務站/.test(L.t));
   r.name = zh.length ? zh[0].t : '';
   return r;
