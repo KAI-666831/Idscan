@@ -104,13 +104,18 @@
          display:flex; gap:12px; padding:0 20px; align-items:center; }
   #bar button { flex:1; }
   #shutter { flex:0 0 76px !important; height:76px; border-radius:50%; background:#fff; border:5px solid #888; padding:0; }
+  #contBar { position:absolute; left:16px; right:16px; bottom:calc(env(safe-area-inset-bottom) + 120px); display:none;
+             background:rgba(0,0,0,.65); color:#fff; border-radius:14px; padding:12px 14px; text-align:center; }
+  .cb-top { font-size:14px; opacity:.8; } .cb-top b { font-size:20px; }
+  #contMsg { font-size:18px; font-weight:700; margin-top:4px; }
+  #frame { transition:border-color .2s; }
   #zoomRow { position:absolute; left:20px; right:20px; bottom:calc(env(safe-area-inset-bottom) + 120px); display:none; }
   #zoomRow input { width:100%; }
 </style>
 </head>
 <body>
 <h1>身分證辨識</h1>
-<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/14-b</span></div>
+<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/14-c</span></div>
 
 <div class="card">
   <div id="types" class="seg">
@@ -122,6 +127,7 @@
     <button data-t="dl">駕照</button>
   </div>
   <button id="scanBtn" onclick="openCamera()">📷 掃描身分證正面</button>
+  <button class="sec" onclick="openContinuous()">🔁 連續掃描（自動辨識、自動存檔）</button>
   <button class="sec" onclick="document.getElementById('pick').click()">從相簿選擇</button>
   <input id="pick" type="file" accept="image/*">
   <canvas id="cardView"></canvas>
@@ -223,8 +229,12 @@
   <div id="frame"></div>
   <div id="hint"></div>
   <div id="zoomRow"><input id="zoom" type="range" min="0.3" max="4" step="0.01" value="1"></div>
+  <div id="contBar">
+    <div class="cb-top">已存 <b id="contCount">0</b> 筆</div>
+    <div id="contMsg">等待證件…</div>
+  </div>
   <div id="bar">
-    <button class="sec" style="background:#0008;color:#fff;border-color:#fff" onclick="closeOverlay()">取消</button>
+    <button class="sec" style="background:#0008;color:#fff;border-color:#fff" onclick="cont ? stopContinuous() : closeOverlay()">取消／完成</button>
     <button id="shutter" onclick="capture()" aria-label="拍照"></button>
     <button id="useBtn" style="display:none" onclick="useCrop()">使用框內</button>
     <button id="wholeBtn" class="hide" style="display:none" onclick="useWhole()">整張</button>
@@ -237,6 +247,7 @@
 <script src="qrcode.js"></script>
 <script src="pair.js"></script>
 <script src="crew.js"></script>
+<script src="cont.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const CARD = 85.6/54, BOOK = 125/88;
