@@ -111,7 +111,6 @@ async function contTick() {
     }
     if (!cont) return;
     if (recordOk(r)) {
-      r.name = toTrad(r.name);
       // 號碼要連續讀到兩次一樣才存（檢查碼抓不到 3↔8、0↔6 這類錯）
       const same = cont.cand && primaryNo(cont.cand) === primaryNo(r) && (cont.cand.birth || '') === (r.birth || '');
       if (!same) {

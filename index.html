@@ -115,7 +115,7 @@
 </head>
 <body>
 <h1>身分證辨識</h1>
-<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/14-i</span></div>
+<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/14-j</span></div>
 
 <div class="card">
   <div id="types" class="seg">
@@ -583,11 +583,10 @@ function nameFromChars(chars) {
     const last = gaps[gaps.length - 1], ref = Math.min(...gaps.slice(0, -1));
     if (last < ref * 0.6) seq = seq.slice(0, -1); else break;
   }
-  return seq.map(c => TO_TRAD[c.ch] || c.ch).join('');
+  return seq.map(c => c.ch).join('');
 }
 
 const OFFSETS = [[0,0],[0,-0.02],[0,0.02],[-0.02,0],[0.02,0],[0,-0.04],[0,0.04],[-0.02,-0.02],[0.02,0.02]];
-const TO_TRAD = { '黄':'黃','颖':'穎','华':'華','国':'國','伟':'偉','杰':'傑','俊':'俊','丽':'麗','婷':'婷','军':'軍','龙':'龍','刘':'劉','陈':'陳','张':'張','吴':'吳','郑':'鄭','许':'許','谢':'謝','罗':'羅','叶':'葉','苏':'蘇','庄':'莊','钟':'鍾','赖':'賴','杨':'楊','萧':'蕭','邓':'鄧','冯':'馮','韩':'韓','贺':'賀','卢':'盧','顾':'顧','汤':'湯' };
 // 常見姓氏：票數一樣時，第一個字是常見姓的優先（例如「王」比「全」）
 const COMMON_SURNAMES = '陳林黃張李王吳劉蔡楊許鄭謝洪郭邱曾廖賴徐周葉蘇莊呂江何蕭羅高潘簡朱鍾游彭詹胡施沈余盧梁趙顏柯翁魏孫戴范方宋鄧杜傅侯曹薛丁卓阮馬董溫唐藍石蔣古紀姚連馮歐程湯田康姜白汪鄒尤巫鐘黎涂龔嚴韓袁金童陸夏柳凃邵錢伍倪于譚駱熊任甘秦顧毛章史官萬俞雷粘饒闕凌崔尹孔辛武辜陶段龍韋葛池孟褚殷麥賀賈莫';
 const NAME_JUNK = '具目且貝旦日自皿！!|丨';
@@ -626,7 +625,6 @@ async function runGeneric(card, log) {
   const g = guessType(lines);
   if (g && g !== docType && g !== 'id') setType(g);
   const r = await ({ arc:parseArc, passport:parsePassportLines, seaman:parseSeaman, nhi:parseNhi, dl:parseDl })[docType](lines, card);
-  if (r.name) r.name = toTrad(r.name);
   if (r.birth && !birthOk(docType, r.birth)) r.birth = '';        // 不合理的生日當作沒讀到
   for (const k of ALL_F) if (r[k] && TYPES[docType].f[k]) $(k).value = r[k];
   if (!$('sex').value) {
@@ -664,7 +662,7 @@ async function runOcr(card) {
         // 每個字換算成在證件上的橫向位置（0~1），之後逐字依位置投票
         const li = cs.map(c => c.ch).lastIndexOf('名');
         const rd = cs.slice(li + 1).filter(c => /[\u4e00-\u9fff]/.test(c.ch))
-          .map(c => ({ X: (0.0 + dx) + c.x * 0.70, ch: toTrad(TO_TRAD[c.ch] || c.ch) })).filter(c => c.X > 0.15);
+          .map(c => ({ X: (0.0 + dx) + c.x * 0.70, ch: c.ch })).filter(c => c.X > 0.15);
         nameReads.push(rd);
         log.push('名: ' + cs.map(c => c.ch).join('') + ' → ' + rd.map(c => c.ch + '@' + c.X.toFixed(2)).join(' '));
       }
