@@ -46,7 +46,7 @@ async function openContinuous() {
   $('contBar').style.display = 'block'; $('contCount').textContent = '0';
   $('hint').textContent = '把證件放進框內，拿穩就會自動辨識';
   contUI('等待證件…', '#22c55e');
-  cont.timer = setInterval(contTick, 350);
+  cont.timer = setInterval(contTick, 250);
 }
 function stopContinuous() {
   if (!cont) return;
@@ -65,17 +65,22 @@ async function contTick() {
   const d = frameDiff(f, cont.prev); cont.prev = f;
 
   if (cont.state === 'remove') {                 // 等你把上一張移開
-    if (frameDiff(f, cont.sig) > 14) { cont.state = 'seek'; cont.still = 0; contUI('放下一張', '#22c55e'); }
+    // 要真的移開（畫面大變、而且連續兩次）才算換下一張，避免手晃一下就重掃
+    cont.gone = frameDiff(f, cont.sig) > 28 ? (cont.gone || 0) + 1 : 0;
+    if (cont.gone >= 2) { cont.state = 'seek'; cont.still = 0; cont.seenAt = 0; cont.gone = 0; contUI('放下一張', '#22c55e'); }
     return;
   }
   if (cont.state === 'cool') {                   // 沒讀完整：等畫面變了再試
-    if (frameDiff(f, cont.sig) > 6 || Date.now() > cont.until) { cont.state = 'seek'; cont.still = 0; contUI('再試一次，拿穩…', '#eab308'); }
+    if (Date.now() > cont.until) { cont.state = 'seek'; cont.still = 0; cont.seenAt = Date.now() - 1500; contUI('再試一次…', '#eab308'); }
     return;
   }
   // seek：畫面要有東西、而且連續幾次幾乎不動（不模糊）才辨識
-  if (frameStd(f) < 18) { cont.still = 0; contUI('等待證件…'); return; }
-  cont.still = d < 4 ? cont.still + 1 : 0;
-  if (cont.still < 3) { contUI(d < 4 ? '拿穩…' : '偵測到證件，拿穩…', '#eab308'); return; }
+  if (frameStd(f) < 18) { cont.still = 0; cont.seenAt = 0; contUI('等待證件…'); return; }
+  if (!cont.seenAt) cont.seenAt = Date.now();
+  // 手拿一定會微晃：門檻放寬；而且看到證件超過 2 秒就算還在晃也直接辨識（辨識本身會多讀幾次投票）
+  cont.still = d < 9 ? cont.still + 1 : 0;
+  const waited = Date.now() - cont.seenAt;
+  if (cont.still < 2 && waited < 2000) { contUI(d < 9 ? '拿穩…' : '偵測到證件，拿穩…', '#eab308'); return; }
 
   cont.busy = true; contUI('辨識中…', '#3b82f6');
   try {
@@ -102,7 +107,7 @@ async function contTick() {
     } else {
       cont.fails++;
       contUI('沒讀完整，稍微調整角度或避開反光', '#dc2626');
-      cont.state = 'cool'; cont.sig = f; cont.until = Date.now() + 2500;
+      cont.state = 'cool'; cont.sig = f; cont.until = Date.now() + 1200;
     }
   } catch (e) { contUI('辨識失敗：' + e.message, '#dc2626'); cont && (cont.state = 'cool', cont.sig = f, cont.until = Date.now() + 2500); }
   finally { if (cont) cont.busy = false; }
