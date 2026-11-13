@@ -115,7 +115,7 @@
 </head>
 <body>
 <h1>身分證辨識</h1>
-<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/14-k</span></div>
+<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/14-l</span></div>
 
 <div class="card">
   <div id="types" class="seg">
@@ -567,13 +567,18 @@ function positionalName(reads) {
     if (!best || score > best.score) best = { score, pick };
   }
   if (!best) return '';
-  return best.pick.map((c, i) => {
-    if (i === 0) {   // 第一個字（姓）：候選裡有常見姓氏就優先，例如「全」「干」多半是「王」誤讀
-      const common = Object.entries(c.cnt).filter(([ch]) => COMMON_SURNAMES.includes(ch)).sort((a, b) => b[1] - a[1])[0];
-      if (common && !COMMON_SURNAMES.includes(c.ch)) return common[0];
+  let pick = best.pick.map((c, i) => {
+    if (i === 0) {   // 第一個字（姓）：只有票數一樣時才讓常見姓氏優先（「全」本身也是真的姓，不能硬改）
+      const top = Math.max(...Object.values(c.cnt));
+      const tied = Object.keys(c.cnt).filter(ch => c.cnt[ch] === top);
+      const common = tied.find(ch => COMMON_SURNAMES.includes(ch));
+      if (common) return common;
     }
     return c.ch;
-  }).join('');
+  });
+  // 前面多一個字（「姓名」標籤被讀成「共」「甲」）：4 個字、第一個不是常見姓、第二個是，就去掉第一個
+  if (pick.length === 4 && !COMMON_SURNAMES.includes(pick[0]) && COMMON_SURNAMES.includes(pick[1])) pick = pick.slice(1);
+  return pick.join('');
 }
 // 至少讀 9 次，而且最近兩次算出來的名字一樣才停
 function nameStable(reads) {
@@ -722,7 +727,7 @@ function render() {
   $('count').textContent = a.length; if ($('paxCount')) $('paxCount').textContent = a.length;
   const bad = conflictSet(a);
   $('list').tBodies[0].innerHTML = a.map((r,i) =>
-    `<tr><td>${esc(TYPES[r.type||'id']?.label||'')}</td><td>${bad.has(i) ? '<span class="bad">⚠ </span>' : ''}${esc(primaryName(r))}</td><td>${esc(r.birth)}</td><td>${esc(primaryNo(r))}</td><td>${r.confirmed ? '<span class="ck">✓</span>' : ''}</td><td><a href="#" onclick="del(${i});return false">刪</a></td></tr>`).join('');
+    `<tr><td>${esc(TYPES[r.type||'id']?.label||'')}</td><td onclick="editRec(${i})" style="text-decoration:underline dotted;cursor:pointer">${bad.has(i) ? '<span class="bad">⚠ </span>' : ''}${esc(primaryName(r))}</td><td>${esc(r.birth)}</td><td>${esc(primaryNo(r))}</td><td>${r.confirmed ? '<span class="ck">✓</span>' : ''}</td><td><a href="#" onclick="del(${i});return false">刪</a></td></tr>`).join('');
 }
 // ---------- 給客人確認 ----------
 const EN_LABEL = { name:'Name', nameEn:'Name', birth:'Date of birth', idno:'ID No.', ppno:'Passport No.', nat:'Nationality', docno:'Book No.' };
@@ -786,6 +791,14 @@ function saveRecord() {
   if (!okToSave(r)) return;
   storeRecord({ ...r, confirmed:false });
   clearFields(); $('cardView').style.display = 'none';
+}
+// 點清單上的姓名直接修改（辨識偶爾認錯一個字時最快）
+function editRec(i) {
+  const a = load(), r = a[i]; if (!r) return;
+  const k = EN_FIRST(r.type) && r.nameEn ? 'nameEn' : 'name';
+  const v = prompt(`修改姓名（${primaryNo(r)}）`, r[k] || '');
+  if (v === null) return;
+  r[k] = v.trim(); a[i] = r; store(a); render();
 }
 function del(i) { const a = load(); a.splice(i,1); store(a); render(); }
 function clearAll() { if (confirm('確定刪除全部資料？')) { store([]); render(); } }

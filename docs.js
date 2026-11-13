@@ -72,7 +72,8 @@ function findIds(lines) {                     // 身分證 / 居留證 / 統一�
 }
 const LABELS = /^(姓名|NAME|出生日期|出生地|性别|性別|身分證號碼|住址|備註|發照日期|有效日期|國籍|男|女|台灣|臺灣|越南|印尼|菲律賓|泰國|外僑居留證|中華民國居留證|居留證)$/;
 const EN_STOP = /^(ARC|NAME|BIRTHDAY|BIRTHPLACE|SEX|ADDRESS|REMARKS|PERMIT|MULTIPLE|RE-ENTRY|MULTIPLERE-ENTRY|MALE|FEMALE|M|F|TAIWAN|TAIPEI|NATIONAL|HEALTH|INSURANCE|NATIONALHEALTHINSURANCE|PASSPORT|REPUBLIC|CHINA|ROC|R\.O\.C\.)$/;
-const isEnName = t => /^[A-Z][A-Z .,'-]*[A-Z]$/.test(t) && !EN_STOP.test(t.replace(/\s/g,'')) && !/[0-9]/.test(t);
+const EN_LABEL_PART = /NATION|RESIDEN|CERTIF|PERMIT|ALIEN|AUTHOR|PURPOSE|ADDRES|EXPIR|BIRTH|ISSUE|PASSPORT|TAIWAN|ENTRY|MALE/;
+const isEnName = t => /^[A-Z][A-Z .,'-]*[A-Z]$/.test(t) && !EN_STOP.test(t.replace(/\s/g,'')) && !EN_LABEL_PART.test(t.replace(/\s/g,'')) && !/[0-9]/.test(t);
 const NATS = ['越南','印尼','菲律賓','泰國','緬甸','馬來西亞','柬埔寨','斯里蘭卡','孟加拉','印度','日本','韓國','美國','中國大陸','俄羅斯','烏克蘭','英國','法國','德國','加拿大','澳大利亞','澳洲','紐西蘭','新加坡','香港','澳門','蒙古','尼泊爾','巴基斯坦','南非','巴西','墨西哥','義大利','西班牙','荷蘭','土耳其','寮國','汶萊','東帝汶','吉里巴斯','吐瓦魯','斐濟','索羅門群島','巴拿馬','祕魯','智利','阿根廷'];
 const MONTHS = { JAN:1,FEB:2,MAR:3,APR:4,MAY:5,JUN:6,JUL:7,AUG:8,SEP:9,OCT:10,NOV:11,DEC:12 };
 

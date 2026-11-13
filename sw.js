@@ -1,6 +1,6 @@
 // 程式本體：先抓網路最新版，沒網路才用快取
 // 模型與引擎由 app 自己存在 idscan-models-v1，這裡不碰、更新時也不刪
-const CACHE = 'idscan-v16', KEEP = [CACHE, 'idscan-models-v1'];
+const CACHE = 'idscan-v17', KEEP = [CACHE, 'idscan-models-v1'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(['./', './index.html', './checks.js', './docs.js', './pair.js', './qrcode.js', './crew.js', './cont.js', './ort/ort.wasm.min.js', './ort/ort-wasm-simd-threaded.mjs'])));
   self.skipWaiting();
