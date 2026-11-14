@@ -60,6 +60,7 @@ async function openContinuous() {
   cont = { base: docType, state: 'seek', prev: null, still: 0, sig: null, count: 0, busy: false, audio, fails: 0 };
   $('shutter').style.display = 'none';
   $('contBar').style.display = 'block'; $('contCount').textContent = '0';
+  cont.recent = []; renderRecent(); $('contRecent').style.display = 'block';
   $('hint').textContent = '把證件放進框內，拿穩就會自動辨識';
   contUI('等待證件…', '#22c55e');
   cont.timer = setInterval(contTick, 250);
@@ -69,7 +70,7 @@ function stopContinuous() {
   clearInterval(cont.timer);
   const n = cont.count;
   cont = null;
-  $('contBar').style.display = 'none'; $('frame').style.borderColor = '#22c55e';
+  $('contBar').style.display = 'none'; $('contRecent').style.display = 'none'; $('frame').style.borderColor = '#22c55e';
   closeOverlay();
   setType(TYPES[docType] ? docType : 'id');
   if (n) toast(`連續掃描完成，共存了 ${n} 筆`);
@@ -135,6 +136,7 @@ async function contTick() {
       else {
         storeRecord({ ...r, confirmed:false });
         cont.count++; $('contCount').textContent = cont.count;
+        cont.recent.unshift(r); renderRecent();
         beep(true); contUI(`✓ ${primaryName(r)}　${primaryNo(r)}　已存檔，請移開`, '#16a34a');
       }
       clearFields(); $('cardView').style.display = 'none';
@@ -146,4 +148,14 @@ async function contTick() {
     }
   } catch (e) { contUI('辨識失敗：' + e.message, '#dc2626'); cont && (cont.state = 'cool', cont.sig = f, cont.until = Date.now() + 2500); }
   finally { if (cont) cont.busy = false; }
+}
+
+// 取景框上方：顯示這次連續掃描剛存的資料（最新的在最上面），方便一邊掃一邊核對
+function renderRecent() {
+  const box = $('contRecent'); if (!box || !cont) return;
+  const r = frameRect();
+  box.style.maxHeight = Math.max(80, r.y - 70 - box.offsetTop) + 'px';
+  box.innerHTML = cont.recent.length
+    ? cont.recent.map((x, i) => `<div class="cr${i === 0 ? ' new' : ''}"><span class="n">${esc(primaryName(x))}</span><span class="b">${esc(x.birth || '')}</span><span class="i">${esc(primaryNo(x))}</span></div>`).join('')
+    : '<div class="cr empty">掃描成功的資料會顯示在這裡</div>';
 }
