@@ -130,16 +130,20 @@ function renderManifestCanvas() {
   const { title, crew, pax } = manifestData();
   const rows = [...crew.map((r, i) => [i + 1, { ...r, role: crewRole(r) }, 'crew']),
                 ...Array.from({ length: Math.max(23, pax.length) }, (_, i) => [i + 1, pax[i] ? { ...pax[i], role: undefined } : null, 'pax'])];
-  const W = 2000, cols = [0.07, 0.22, 0.11, 0.22, 0.24, 0.14], X0 = 100, TW = W - 200, RH = 74, TOP = 230;
-  const H = TOP + RH * (rows.length + 1) + 120;
+  // 直接畫成 A4 直式比例，列高依人數拉高到填滿整頁（印出來不會下面空一大片）
+  const W = 2000, cols = [0.07, 0.22, 0.11, 0.22, 0.24, 0.14], X0 = 50, TW = W - 100, TOP = 190, BOT = 40;
+  const A4H = Math.round(W * 297 / 210);
+  const RH = Math.max(52, Math.floor((A4H - TOP - BOT) / (rows.length + 1)));
+  const H = Math.max(A4H, TOP + RH * (rows.length + 1) + BOT);
+  const FS = Math.round(Math.min(58, RH * 0.5));          // 字體跟著列高放大
   const c = document.createElement('canvas'); c.width = W; c.height = H;
   const g = c.getContext('2d');
   g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.fillStyle = '#000'; g.strokeStyle = '#000';
   const F = '"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif';
-  g.font = `600 62px ${F}`; g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillText(title, W / 2, 140);
+  g.font = `600 76px ${F}`; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(title, W / 2, 100);
   const xs = [X0]; cols.forEach(w => xs.push(xs[xs.length - 1] + w * TW));
-  const cell = (txt, i, y, size = 40) => {
+  const cell = (txt, i, y, size = FS) => {
     g.font = `${size}px ${F}`; let s = size;
     while (g.measureText(txt).width > (xs[i+1] - xs[i]) - 16 && s > 18) { s -= 2; g.font = `${s}px ${F}`; }
     g.fillText(txt, (xs[i] + xs[i+1]) / 2, y + RH / 2);
@@ -156,8 +160,9 @@ function renderManifestCanvas() {
     } else cell('/   /   /', 3, y);
     const sx = r ? inferSex(r) : '';
     const cx = (xs[2] + xs[3]) / 2;
-    g.font = `40px ${F}`; g.fillText("男", cx - 36, y + RH / 2); g.fillText("女", cx + 36, y + RH / 2);
-    if (sx) { g.lineWidth = 3; g.beginPath(); g.arc(cx + (sx === "男" ? -36 : 36), y + RH / 2, 28, 0, Math.PI * 2); g.stroke(); }
+    const off = FS * 0.95;
+    g.font = `${FS}px ${F}`; g.fillText("男", cx - off, y + RH / 2); g.fillText("女", cx + off, y + RH / 2);
+    if (sx) { g.lineWidth = 3; g.beginPath(); g.arc(cx + (sx === "男" ? -off : off), y + RH / 2, FS * 0.68, 0, Math.PI * 2); g.stroke(); }
   });
   const yEnd = TOP + RH * (rows.length + 1);
   for (let k = 0; k <= rows.length + 1; k++) {
@@ -187,7 +192,7 @@ function manifestPdf() {
   const { canvas, title } = renderManifestCanvas();
   canvas.toBlob(async b => {
     const jpg = new Uint8Array(await b.arrayBuffer());
-    const PW = 595.28, PH = 841.89, M = 28;
+    const PW = 595.28, PH = 841.89, M = 12;
     const s = Math.min((PW - 2*M) / canvas.width, (PH - 2*M) / canvas.height);
     const w = canvas.width * s, h = canvas.height * s, x = (PW - w) / 2, y = PH - M - h;
     const enc = new TextEncoder(), parts = [], offs = [];
