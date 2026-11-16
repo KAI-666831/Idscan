@@ -49,7 +49,7 @@ async function readAllLines(img, onProgress) {
     const b = boxes[i];
     if (onProgress) onProgress(i+1, boxes.length);
     const t = await recRegion(img, b.x0, b.y0, b.x1, b.y1);
-    if (t) lines.push({ ...b, t, cx: (b.x0+b.x1)/2, cy: (b.y0+b.y1)/2 });
+    if (t) lines.push({ ...b, t, p: recRegion.lastMinP, cx: (b.x0+b.x1)/2, cy: (b.y0+b.y1)/2 });
   }
   lines.sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0);
   return lines;

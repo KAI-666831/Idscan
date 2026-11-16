@@ -56,7 +56,7 @@ function confirmRowsHtml(rec) {
 
 // ================= 主機端 =================
 let opLink = null, dispSeen = 0;
-const pending = new Map();
+const pending = new Map(), pendingCrops = new Map();
 function opState() {
   const el = $('pairState'); if (!el) return;
   const p = lsGet('idscan_pair_op');
@@ -84,7 +84,7 @@ function opOnMsg(m) {
     const rec = pending.get(m.data.id); if (!rec) return;
     pending.delete(m.data.id);
     if (m.data.ok) {
-      storeRecord({ ...rec, confirmed:true, confirmedAt:new Date().toISOString() });
+      storeRecord({ ...rec, confirmed:true, confirmedAt:new Date().toISOString() }, pendingCrops.get(m.data.id)); pendingCrops.delete(m.data.id);
       toast(`✓ ${primaryName(rec) || primaryNo(rec)} 已確認並儲存`);
     } else {
       toast(`✗ ${primaryName(rec) || primaryNo(rec)} 說資料有錯，已放回表單請修改`, true);
@@ -103,10 +103,12 @@ async function pingDisplay() {
 }
 function isPaired() { return !!(opLink && lsGet('idscan_pair_op')); }
 async function sendToDisplay(rec) {
-  rec.id = rand(6); rec.sentAt = Date.now();
+  rec.id = rand(6); rec.sentAt = Date.now(); rec.unsure = lastUnsure.slice();
+  const crop = lastCrop;
   pending.set(rec.id, rec);
   try {
     await opLink.send('show', rec);
+    pendingCrops.set(rec.id, crop);
     clearFields(); $('cardView').style.display = 'none';
     $('status').textContent = '已送到副機，客人確認中…可以先掃下一位。';
   } catch (e) {

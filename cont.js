@@ -121,22 +121,24 @@ async function contTick() {
           contUI('讀了幾次結果都不一樣，請調整角度或改用單張掃描', '#dc2626');
           cont.state = 'cool'; cont.sig = f; cont.until = Date.now() + 1500; return;
         }
-        cont.cand = r;
+        cont.cand = r; cont.candUnsure = lastUnsure.slice();
         contUI(`讀到 ${primaryName(r)}，再確認一次…`, '#3b82f6');
         cont.seenAt = Date.now() - 2000; cont.still = 0;      // 馬上再讀一次
         return;
       }
       // 兩次一樣：姓名取比較可信的那個（常見姓氏、三個字優先）
       const nv = {}; [cont.cand, r].forEach(x => { const n = primaryName(x); if (n) nv[n] = (nv[n] || 0) + 1; });
+      const un = new Set([...(cont.candUnsure || []), ...lastUnsure]);
+      if (Object.keys(nv).length > 1) un.add(EN_FIRST(r.type) ? 'nameEn' : 'name');   // 兩次讀到的名字不一樣 → 請核對
       if (!EN_FIRST(r.type)) r.name = pickName(nv) || r.name;
       cont.cand = null; cont.tries = 0;
       const c = findConflict(r);
       if (c && c.kind === 'dup') { beep(false); contUI(`${c.msg}，請換下一張`, '#eab308'); }
       else if (c) { beep(false); contUI(`⚠ ${c.msg}。沒有存檔，請看實體證件，用單張掃描確認`, '#dc2626'); }
       else {
-        storeRecord({ ...r, confirmed:false });
+        storeRecord({ ...r, confirmed:false, unsure:[...un] }, lastCrop);
         cont.count++; $('contCount').textContent = cont.count;
-        cont.recent.unshift(r); renderRecent();
+        cont.recent.unshift({ ...r, unsure:[...un] }); renderRecent();
         beep(true); contUI(`✓ ${primaryName(r)}　${primaryNo(r)}　已存檔，請移開`, '#16a34a');
       }
       clearFields(); $('cardView').style.display = 'none';
@@ -156,6 +158,6 @@ function renderRecent() {
   const r = frameRect();
   box.style.maxHeight = Math.max(80, r.y - 70 - box.offsetTop) + 'px';
   box.innerHTML = cont.recent.length
-    ? cont.recent.map((x, i) => `<div class="cr${i === 0 ? ' new' : ''}"><span class="n">${esc(primaryName(x))}</span><span class="b">${esc(x.birth || '')}</span><span class="i">${esc(primaryNo(x))}</span></div>`).join('')
+    ? cont.recent.map((x, i) => `<div class="cr${i === 0 ? ' new' : ''}${(x.unsure || []).length ? ' un' : ''}"><span class="n">${(x.unsure || []).length ? '⚠ ' : ''}${esc(primaryName(x))}</span><span class="b">${esc(x.birth || '')}</span><span class="i">${esc(primaryNo(x))}</span></div>`).join('')
     : '<div class="cr empty">掃描成功的資料會顯示在這裡</div>';
 }

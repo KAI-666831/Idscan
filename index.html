@@ -93,6 +93,13 @@
   body.disp > *:not(#disp):not(script) { display:none !important; }
   body.disp #disp { display:block !important; }
 
+  .field.unsure input, .field.unsure select { border:2px solid #eab308; background:rgba(234,179,8,.12); }
+  .field.unsure label::after { content:'⚠ 請核對'; color:#ca8a04; font-weight:700; }
+  td.unsure-cell { background:rgba(234,179,8,.18); }
+  #review { position:fixed; inset:0; z-index:26; background:#fff; color:#111; display:none; overflow:auto; }
+  #review .field input { color:#111; font-size:20px; }
+  #review .field label { color:#555; }
+
   /* 全螢幕取景 / 裁切畫面 */
   #overlay { position:fixed; inset:0; background:#000; z-index:10; display:none; }
   #overlay video, #overlay img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
@@ -109,6 +116,7 @@
   #contRecent .cr { display:flex; gap:8px; align-items:baseline; padding:7px 0; border-bottom:1px solid rgba(255,255,255,.15); font-size:16px; }
   #contRecent .cr:last-child { border-bottom:0; }
   #contRecent .cr.new { color:#86efac; font-weight:700; }
+  #contRecent .cr.un { color:#fde047; }
   #contRecent .cr.empty { color:#bbb; font-size:14px; justify-content:center; }
   #contRecent .n { flex:1.2; word-break:break-word; }
   #contRecent .b { flex:1; text-align:center; } #contRecent .i { flex:1.3; text-align:right; font-variant-numeric:tabular-nums; }
@@ -123,7 +131,7 @@
 </head>
 <body>
 <h1>身分證辨識</h1>
-<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/17-a</span></div>
+<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/17-b</span></div>
 
 <div class="card">
   <div id="types" class="seg">
@@ -177,6 +185,8 @@
 
 <div class="card">
   <b>已儲存 <span id="count">0</span> 筆</b>（只存在這支手機）
+  <div id="unsureBar" style="display:none;margin:8px 0"><button style="background:#ca8a04" onclick="reviewNextUnsure()">⚠ 有 <span id="unsureN">0</span> 筆需要核對，點這裡逐筆看</button></div>
+  <div style="font-size:12px;color:var(--muted)">點姓名可以看證件照片、修改資料</div>
   <table id="list"><thead><tr><th>類別</th><th>姓名</th><th>生日</th><th>號碼</th><th>確認</th><th></th></tr></thead><tbody></tbody></table>
   <button onclick="exportSimple()">匯出名單 CSV（姓名・生日・證號）</button>
   <button class="sec" onclick="exportCsv()">匯出完整 CSV</button>
@@ -228,6 +238,18 @@
   <a href="#" onclick="dispUnpair();return false" style="position:fixed;top:calc(env(safe-area-inset-top) + 6px);right:12px;font-size:12px;color:#bbb">解除配對</a>
 </div>
 
+<!-- 逐筆核對：照片＋可修改欄位 -->
+<div id="review">
+  <div class="mf-bar"><button class="sec" onclick="closeReview()">關閉</button><button onclick="saveReview(true)">✓ 正確（下一筆）</button></div>
+  <div style="padding:12px 16px">
+    <div id="rvTitle" style="font-weight:700;margin-bottom:8px"></div>
+    <img id="rvImg" alt="" style="width:100%;border-radius:10px;display:none">
+    <div id="rvNoImg" style="display:none;color:#888;font-size:14px">（這筆是加入照片功能之前存的，沒有照片）</div>
+    <div id="rvFields"></div>
+    <div style="font-size:13px;color:#666;margin-top:6px">對照上面的照片，有錯直接改，再按「✓ 正確」。</div>
+  </div>
+</div>
+
 <!-- 給客人看的確認畫面 -->
 <div id="confirm">
   <div class="cf-title">請確認您的資料<br><small>Please check your information</small></div>
@@ -269,6 +291,7 @@
 <script src="crew.js"></script>
 <script src="cont.js"></script>
 <script src="samples.js"></script>
+<script src="crops.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const CARD = 85.6/54, BOOK = 125/88;
@@ -539,13 +562,14 @@ async function recRegion(card, x0, y0, x1, y1, withPos) {
   }
   const out = await sess.run({ [sess.inputNames[0]]: new ort.Tensor('float32', f, [1,3,h,w]) });
   const o = out[sess.outputNames[0]], [, T, C] = o.dims, d = o.data;
-  let s = '', prev = -1; const chars = [];
+  let s = '', prev = -1, minP = 1; const chars = [];
   for (let t = 0; t < T; t++) {
     let bi = 0, bv = -Infinity;
     for (let k = 0; k < C; k++) { const v = d[t*C + k]; if (v > bv) { bv = v; bi = k; } }
-    if (bi !== prev && bi !== 0) { s += dict[bi] || ''; if (withPos && (dict[bi] || '').trim()) chars.push({ ch: dict[bi], x: (t + 0.5) / T }); }
+    if (bi !== prev && bi !== 0) { s += dict[bi] || ''; if ((dict[bi] || '').trim()) minP = Math.min(minP, bv); if (withPos && (dict[bi] || '').trim()) chars.push({ ch: dict[bi], x: (t + 0.5) / T, p: bv }); }
     prev = bi;
   }
+  recRegion.lastMinP = minP;            // 這一條裡最沒把握的那個字的機率
   if (withPos) return chars;             // 每個字和它在這一條裡的橫向位置（0~1）
   return s.trim().replace(/\s+/g, ' ');
 }
@@ -584,7 +608,9 @@ function positionalName(reads) {
     let score = pick.reduce((s, c) => s + c.sup - (LINE_JUNK.includes(c.ch) ? R * 0.5 : 0), 0);
     if (!best || score > best.score) best = { score, pick };
   }
-  if (!best) return '';
+  if (!best) { positionalName.unsure = true; return ''; }
+  // 每個字：讀到的次數太少、或幾次讀出來不一樣 → 沒把握
+  positionalName.unsure = best.pick.length < 2 || best.pick.some(c => c.sup < R * 0.5 || Math.max(...Object.values(c.cnt)) / c.sup < 0.75);
   let pick = best.pick.map((c, i) => {
     if (i === 0) {   // 第一個字（姓）：只有票數一樣時才讓常見姓氏優先（「全」本身也是真的姓，不能硬改）
       const top = Math.max(...Object.values(c.cnt));
@@ -634,6 +660,7 @@ const topVote = c => { const e = Object.entries(c).sort((a,b) => b[1]-a[1]); ret
 const add = (c, k) => c[k] = (c[k]||0) + 1;
 
 function clearFields() {
+  lastCrop = null; if (typeof markUnsure === 'function') markUnsure([]);
   ALL_F.forEach(k => $(k).value = '');
   $('idCheck').textContent = ''; $('birthAd').textContent = ''; $('ppCheck').textContent = '';
 }
@@ -664,6 +691,13 @@ async function runGeneric(card, log) {
     $('sex').value = r.sex || inferSex({ idno: $('idno').value }) || (/女|Female/i.test(all) ? '女' : /男|Male/i.test(all) ? '男' : '');
   }
   checkId();
+  // 名字所在那一行，最沒把握的字機率太低 → 標黃色請核對
+  const strip = t => (t || '').replace(/[\s,]/g, '').toUpperCase();
+  const lineP = v => { const sv = strip(v); if (!sv) return 0; const ls = lines.filter(L => strip(L.t).includes(sv) || (sv.length > 3 && sv.includes(strip(L.t)) && strip(L.t).length >= 2)); return ls.length ? Math.min(...ls.map(L => L.p ?? 1)) : 0; };
+  const un = [];
+  for (const k of ['name', 'nameEn', 'birth']) if (TYPES[docType].f[k] && $(k).value && lineP($(k).value.replace(/-/g, '/').split('/')[0] && k === 'birth' ? $(k).value.split(/[-\/]/)[0] : $(k).value) < 0.9) un.push(k);
+  for (const k of Object.keys(TYPES[docType].f)) if (['name','nameEn','birth','idno','ppno'].includes(k) && !$(k).value) un.push(k);
+  markUnsure(un);
   if (docType === 'passport' && r.mrz) { $('ppCheck').textContent = '✓ MRZ 檢查碼正確'; $('ppCheck').className = 'ok'; }
   $('birthAd').textContent = TYPES[docType].date === 'roc' ? rocToAd($('birth').value) : '';
   const miss = Object.keys(TYPES[docType].f).filter(k => !$(k).value).map(k => TYPES[docType].f[k]);
@@ -709,6 +743,12 @@ async function runOcr(card) {
     }
     $('idno').value = topVote(ids)?.[0] || ''; checkId(); $('sex').value = inferSex({ idno: $('idno').value });
     $('name').value = positionalName(nameReads);
+    const un = [];
+    if (positionalName.unsure || !$('name').value) un.push('name');
+    const bv = Object.entries(births).sort((a, b) => b[1] - a[1]);
+    if (!bv.length || bv[0][1] < 3 || (bv[1] && bv[1][1] >= 2)) un.push('birth');
+    if (!(topVote(ids)?.[1] >= 2)) un.push('idno');
+    markUnsure(un);
     $('birth').value = topVote(births)?.[0] || '';
     $('birthAd').textContent = rocToAd($('birth').value);
     $('status').textContent = '完成，請核對後儲存。空白或有錯的欄位可直接修改。';
@@ -720,6 +760,7 @@ async function runOcr(card) {
   $('prog').style.display = 'none';
   const res = {}; ALL_F.forEach(k => { if ($(k).value) res[k] = $(k).value; });
   saveSample(card, log, res);
+  try { lastCrop = await makeCrop(card, docType); } catch { lastCrop = null; }
 }
 
 function rocToAd(s) {
@@ -743,10 +784,12 @@ const store = a => { try { localStorage.setItem(KEY, JSON.stringify(a)); } catch
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
 function render() {
   const a = load();
-  $('count').textContent = a.length; if ($('paxCount')) $('paxCount').textContent = a.length;
+  $('count').textContent = a.length;
+  const nUn = a.filter(x => (x.unsure || []).length).length;
+  $('unsureBar').style.display = nUn ? 'block' : 'none'; $('unsureN').textContent = nUn; if ($('paxCount')) $('paxCount').textContent = a.length;
   const bad = conflictSet(a);
   $('list').tBodies[0].innerHTML = a.map((r,i) =>
-    `<tr><td>${esc(TYPES[r.type||'id']?.label||'')}</td><td onclick="editRec(${i})" style="text-decoration:underline dotted;cursor:pointer">${bad.has(i) ? '<span class="bad">⚠ </span>' : ''}${esc(primaryName(r))}</td><td>${esc(r.birth)}</td><td>${esc(primaryNo(r))}</td><td>${r.confirmed ? '<span class="ck">✓</span>' : ''}</td><td><a href="#" onclick="del(${i});return false">刪</a></td></tr>`).join('');
+    `<tr><td>${esc(TYPES[r.type||'id']?.label||'')}</td><td onclick="openReview(${i})" class="${(r.unsure || []).length ? 'unsure-cell' : ''}" style="text-decoration:underline dotted;cursor:pointer">${bad.has(i) ? '<span class="bad">⚠ </span>' : ''}${(r.unsure || []).length ? '⚠ ' : ''}${esc(primaryName(r))}</td><td>${esc(r.birth)}</td><td>${esc(primaryNo(r))}</td><td>${r.confirmed ? '<span class="ck">✓</span>' : ''}</td><td><a href="#" onclick="del(${i});return false">刪</a></td></tr>`).join('');
 }
 // ---------- 給客人確認 ----------
 const EN_LABEL = { name:'Name', nameEn:'Name', birth:'Date of birth', idno:'ID No.', ppno:'Passport No.', nat:'Nationality', docno:'Book No.' };
@@ -767,8 +810,13 @@ function fillRecord(r) {
   const first = Object.keys(TYPES[docType].f)[0];
   $(first).scrollIntoView({ block:'center' });
 }
-function storeRecord(r) {
-  const a = load(); a.push({ ...r, t: r.t || new Date().toISOString() }); store(a); render();
+function storeRecord(r, crop) {
+  const rid = 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  const rec = { ...r, rid, t: r.t || new Date().toISOString() }; delete rec._crop;
+  if (!rec.unsure) rec.unsure = lastUnsure.slice();
+  const a = load(); a.push(rec); store(a);
+  if (crop) putCrop(rid, crop);
+  render();
 }
 
 let localRec = null;
@@ -789,7 +837,7 @@ function openLocalConfirm(r) {
 function confirmYes() {
   $('confirm').style.display = 'none'; $('cfImg').src = '';
   if (!okToSave(localRec)) { $('status').textContent = '沒有儲存，請核對證件後再試。'; return; }
-  storeRecord({ ...localRec, confirmed:true, confirmedAt:new Date().toISOString() });
+  storeRecord({ ...localRec, confirmed:true, confirmedAt:new Date().toISOString() }, lastCrop);
   clearFields(); $('cardView').style.display = 'none';
   $('status').textContent = '✓ 客人已確認並儲存。可以掃下一位。';
   scrollTo({ top:0, behavior:'smooth' });
@@ -808,7 +856,7 @@ function okToSave(r) {
 function saveRecord() {
   const r = collectRecord(); if (!hasData(r)) return;
   if (!okToSave(r)) return;
-  storeRecord({ ...r, confirmed:false });
+  storeRecord({ ...r, confirmed:false }, lastCrop);
   clearFields(); $('cardView').style.display = 'none';
 }
 // 點清單上的姓名直接修改（辨識偶爾認錯一個字時最快）
@@ -819,8 +867,8 @@ function editRec(i) {
   if (v === null) return;
   r[k] = v.trim(); a[i] = r; store(a); render();
 }
-function del(i) { const a = load(); a.splice(i,1); store(a); render(); }
-function clearAll() { if (confirm('確定刪除全部資料？')) { store([]); render(); } }
+function del(i) { const a = load(); if (a[i] && a[i].rid) delCrop(a[i].rid); a.splice(i,1); store(a); render(); }
+function clearAll() { if (confirm('確定刪除全部資料？（附的證件照片也會一起刪除）')) { store([]); clearCrops(); render(); } }
 function downloadCsv(rows, name) {
   const csv = '\ufeff' + rows.map(r => r.map(x => `"${String(x).replace(/"/g,'""')}"`).join(',')).join('\r\n');
   const a = document.createElement('a');
