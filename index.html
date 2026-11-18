@@ -120,6 +120,10 @@
   #contRecent .cr.empty { color:#bbb; font-size:14px; justify-content:center; }
   #contRecent .n { flex:1.2; word-break:break-word; }
   #contRecent .b { flex:1; text-align:center; } #contRecent .i { flex:1.3; text-align:right; font-variant-numeric:tabular-nums; }
+  #contTypes { position:absolute; left:16px; right:16px; display:none; gap:6px; }
+  #contTypes button { flex:1; padding:10px 0; font-size:18px; font-weight:700; background:rgba(0,0,0,.6); color:#fff; border:1.5px solid rgba(255,255,255,.6); border-radius:10px; }
+  #contTypes button.on { background:#2563eb; border-color:#2563eb; }
+  #contTypes button[data-b="auto"].on { background:#16a34a; border-color:#16a34a; }
   #contBar { position:absolute; left:16px; right:16px; bottom:calc(env(safe-area-inset-bottom) + 120px); display:none;
              background:rgba(0,0,0,.65); color:#fff; border-radius:14px; padding:12px 14px; text-align:center; }
   .cb-top { font-size:14px; opacity:.8; } .cb-top b { font-size:20px; }
@@ -131,7 +135,7 @@
 </head>
 <body>
 <h1>身分證辨識</h1>
-<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/17-b</span></div>
+<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/19-a</span></div>
 
 <div class="card">
   <div id="types" class="seg">
@@ -269,6 +273,10 @@
   <div id="hint"></div>
   <div id="zoomRow"><input id="zoom" type="range" min="0.3" max="4" step="0.01" value="1"></div>
   <div id="contRecent"></div>
+  <div id="contTypes">
+    <button data-b="auto">自</button><button data-b="id">身</button><button data-b="arc">居</button><button data-b="passport">護</button>
+    <button data-b="seaman">船</button><button data-b="nhi">健</button><button data-b="dl">駕</button>
+  </div>
   <div id="contFlash" style="position:absolute;inset:0;opacity:0;transition:opacity .3s;pointer-events:none"></div>
   <div id="contBar">
     <div class="cb-top">已存 <b id="contCount">0</b> 筆</div>
@@ -331,7 +339,8 @@ function setType(t) {
   $('birth').placeholder = TYPES[t].date === 'roc' ? '例：75/03/21' : '例：1990-03-21';
 }
 document.querySelectorAll('#types button').forEach(b => b.onclick = () => { setType(b.dataset.t); clearFields(); });
-const ratio = () => TYPES[docType].ratio;
+// 連續掃描時框框形狀跟著連續掃描選的類別（自動辨識用卡片比例），辨識中切換類別也不會變形
+const ratio = () => (typeof cont !== 'undefined' && cont && cont.base) ? (cont.base === 'auto' ? CARD : TYPES[cont.base].ratio) : TYPES[docType].ratio;
 
 
 // ---------- 身分證字號檢查碼 ----------
@@ -403,6 +412,7 @@ function placeFrame() {
   const r = frameRect(), f = $('frame');
   Object.assign(f.style, { left:r.x+'px', top:r.y+'px', width:r.w+'px', height:r.h+'px' });
   $('hint').style.top = (r.y - 60) + 'px';
+  const ct = $('contTypes'); if (ct) ct.style.top = (r.y + r.h + 14) + 'px';
 }
 addEventListener('resize', placeFrame);
 
@@ -673,13 +683,13 @@ function guessType(lines) {
   if (/駕駛執照|駕照號碼|交通部製發/.test(all)) return 'dl';
   if (/<<|PASSPORT|護照號|HO\s*CHIEU/i.test(all)) return 'passport';
   if (/BIRTHPLACE|身分證號碼|出生地/i.test(all)) return 'seaman';
-  if (/國民身分證/.test(all)) return 'id';
+  if (/國民身分證|統一編號|發證日期/.test(all)) return 'id';
   return null;
 }
-async function runGeneric(card, log) {
+async function runGeneric(card, log, preLines) {
   await loadDet();
   $('status').textContent = '尋找文字…';
-  const lines = await readAllLines(card, (i, n) => { $('status').textContent = `辨識文字… ${i}/${n}`; $('prog').value = i/n; });
+  const lines = preLines || await readAllLines(card, (i, n) => { $('status').textContent = `辨識文字… ${i}/${n}`; $('prog').value = i/n; });
   lines.forEach(L => log.push(L.t));
   const g = guessType(lines);
   if (g && g !== docType && g !== 'id') setType(g);
@@ -704,7 +714,7 @@ async function runGeneric(card, log) {
   $('status').textContent = miss.length ? `完成。沒讀到：${miss.join('、')}，可直接手動填。` : '完成，請核對後儲存。';
 }
 
-async function runOcr(card) {
+async function runOcr(card, preLines) {
   const view = $('cardView');
   view.width = card.width; view.height = card.height;
   view.getContext('2d').drawImage(card, 0, 0); view.style.display = 'block';
@@ -713,7 +723,7 @@ async function runOcr(card) {
   try {
     await loadModel();
     $('prog').style.display = 'block';
-    if (docType !== 'id') { await runGeneric(card, log); }
+    if (docType !== 'id') { await runGeneric(card, log, preLines); }
     else {
     const ids = {}, births = {}, nameReads = [];
     for (let k = 0; k < OFFSETS.length; k++) {

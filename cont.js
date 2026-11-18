@@ -57,11 +57,12 @@ async function openContinuous() {
   try { audio = new (window.AudioContext || window.webkitAudioContext)(); await audio.resume(); } catch {}   // 要在按鈕觸發時建立，iPhone 才會出聲
   await openCamera();
   if (!stream) return;
-  cont = { base: docType, state: 'seek', prev: null, still: 0, sig: null, count: 0, busy: false, audio, fails: 0 };
+  let base = 'auto'; try { base = localStorage.getItem('idscan_cont_base') || 'auto'; } catch {}
+  cont = { base, state: 'seek', prev: null, still: 0, sig: null, count: 0, busy: false, audio, fails: 0 };
   $('shutter').style.display = 'none';
   $('contBar').style.display = 'block'; $('contCount').textContent = '0';
   cont.recent = []; renderRecent(); $('contRecent').style.display = 'block';
-  $('hint').textContent = '把證件放進框內，拿穩就會自動辨識';
+  $('contTypes').style.display = 'flex'; setContBase(cont.base);
   contUI('等待證件…', '#22c55e');
   cont.timer = setInterval(contTick, 250);
 }
@@ -70,7 +71,7 @@ function stopContinuous() {
   clearInterval(cont.timer);
   const n = cont.count;
   cont = null;
-  $('contBar').style.display = 'none'; $('contRecent').style.display = 'none'; $('frame').style.borderColor = '#22c55e';
+  $('contBar').style.display = 'none'; $('contRecent').style.display = 'none'; $('contTypes').style.display = 'none'; $('frame').style.borderColor = '#22c55e';
   closeOverlay();
   setType(TYPES[docType] ? docType : 'id');
   if (n) toast(`連續掃描完成，共存了 ${n} 筆`);
@@ -102,8 +103,18 @@ async function contTick() {
   cont.busy = true; contUI('辨識中…', '#3b82f6');
   try {
     const card = cropFromVideo();
-    setType(cont.base);
-    await runOcr(card);
+    if (cont.base === 'auto') {
+      // 通用自動辨識：先讀出所有文字判斷是哪種證件；身分證用身分證專用的讀法，其他用剛讀到的文字直接解析
+      await loadDet();
+      const lines = await readAllLines(card, (i, n) => contUI(`辨識中… ${i}/${n}`, '#3b82f6'));
+      if (!cont) return;
+      const g = guessType(lines) || 'id';
+      setType(g);
+      await runOcr(card, g === 'id' ? undefined : lines);
+    } else {
+      setType(cont.base);
+      await runOcr(card);
+    }
     let r = collectRecord(); r.sex = $('sex').value || inferSex(r);
     // 選「身分證」卻放了其他證件：改用通用辨識（會自動判斷類別）
     if (!recordOk(r) && cont.base === 'id') {
@@ -161,3 +172,15 @@ function renderRecent() {
     ? cont.recent.map((x, i) => `<div class="cr${i === 0 ? ' new' : ''}${(x.unsure || []).length ? ' un' : ''}"><span class="n">${(x.unsure || []).length ? '⚠ ' : ''}${esc(primaryName(x))}</span><span class="b">${esc(x.birth || '')}</span><span class="i">${esc(primaryNo(x))}</span></div>`).join('')
     : '<div class="cr empty">掃描成功的資料會顯示在這裡</div>';
 }
+
+// 連續掃描畫面下方的類別按鈕：自（自動辨識）身 居 護 船 健 駕
+function setContBase(b) {
+  if (!cont) return;
+  cont.base = b; cont.cand = null; cont.tries = 0;
+  try { localStorage.setItem('idscan_cont_base', b); } catch {}
+  document.querySelectorAll('#contTypes button').forEach(x => x.classList.toggle('on', x.dataset.b === b));
+  placeFrame();
+  const names = { auto:'自動判斷證件', id:'身分證', arc:'居留證', passport:'護照', seaman:'船員證', nhi:'健保卡', dl:'駕照' };
+  $('hint').textContent = `【${names[b]}】放進框內拿穩就會辨識`;
+}
+document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('#contTypes button'); if (b) setContBase(b.dataset.b); });
