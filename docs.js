@@ -136,9 +136,14 @@ function parseDl(lines) {
   if (ds.length) r.birth = `${ds[0][0]}/${pad2(ds[0][1])}/${pad2(ds[0][2])}`;
   // 姓名：駕照號碼那一列和出生日期那一列之間的中文
   const top = ids[0]?.L.cy ?? 0, bottom = ds.length ? ds[0][3].cy : 1;
-  const left = ids[0] ? ids[0].L.x0 - 0.03 : 0;   // 姓名和駕照號碼左邊對齊；更左邊那欄是「姓名」「號碼」標籤
-  const zh = lines.filter(L => L.cy > top && L.cy < bottom && L.x0 >= left && /^[一-鿿]{2,5}$/.test(L.t)
-    && !/駕|驾|照|號|号|碼|码|姓名|性別|性别|出生|日期|條件|持照|機車|汽車|交通|種類|中華民國/.test(L.t)).sort((a, b) => a.cy - b.cy);
+  // 姓名：駕照號碼那一列和出生日期那一列之間、跟駕照號碼左邊對齊的中文
+  //（舊式駕照「姓名」標籤會跟名字黏在同一格，例如「姓名石原安」；右邊還有「補照次數」「血型」「性別」標籤）
+  const idx0 = ids[0] ? ids[0].L.x0 : 0.15;
+  const zh = lines.filter(L => L.cy > top && L.cy < bottom && L.x0 >= idx0 - 0.08)
+    .map(L => ({ L, t: L.t.replace(/\s/g, '').replace(/^(姓名|姓|名)/, '') }))
+    .filter(o => /^[一-鿿]{2,5}$/.test(o.t)
+      && !/駕|驾|照|號|号|碼|码|姓名|性別|性别|出生|日期|條件|持照|機車|汽車|交通|種類|中華民國|血|型|次|數|数|補|补|吉制/.test(o.t))
+    .sort((a, b) => Math.abs(a.L.x0 - idx0) - Math.abs(b.L.x0 - idx0) || a.L.cy - b.L.cy);
   if (zh.length) r.name = zh[0].t;
   const all = lines.map(L => L.t).join(' ');
   r.sex = /性.?女|女$/.test(all) ? '女' : /性.?男/.test(all) ? '男' : '';
