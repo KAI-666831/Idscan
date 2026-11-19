@@ -192,6 +192,8 @@ async function parseSeaman(lines, img) {
   const score = c => Object.entries(votes).reduce((n, [k, v]) => n + (c.includes(k) ? v : 0), 0);
   const best = Object.keys(votes).map(k => [k, score(k)]).sort((a,b) => b[1]-a[1] || b[0].length - a[0].length)[0];
   r.name = best ? best[0] : '';
+  const tot = Object.values(votes).reduce((a, b) => a + b, 0);
+  r._nameConf = best ? (votes[best[0]] || 0) : 0;     // 一模一樣的結果讀到幾次：少於 2 次就沒把握
   return r;
 }
 

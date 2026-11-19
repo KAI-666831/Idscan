@@ -135,7 +135,7 @@
 </head>
 <body>
 <h1>身分證辨識</h1>
-<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/19-b</span></div>
+<div class="sub">照片只在這支手機上辨識，不會上傳任何伺服器。 <span style="opacity:.6">版本 11/19-c</span></div>
 
 <div class="card">
   <div id="types" class="seg">
@@ -620,7 +620,7 @@ function positionalName(reads) {
   }
   if (!best) { positionalName.unsure = true; return ''; }
   // 每個字：讀到的次數太少、或幾次讀出來不一樣 → 沒把握
-  positionalName.unsure = best.pick.length < 2 || best.pick.some(c => c.sup < R * 0.5 || Math.max(...Object.values(c.cnt)) / c.sup < 0.75);
+  positionalName.unsure = best.pick.length < 2 || best.pick.some(c => c.sup < R * 0.34 || Math.max(...Object.values(c.cnt)) / c.sup < 0.7);
   let pick = best.pick.map((c, i) => {
     if (i === 0) {   // 第一個字（姓）：只有票數一樣時才讓常見姓氏優先（「全」本身也是真的姓，不能硬改）
       const top = Math.max(...Object.values(c.cnt));
@@ -704,9 +704,17 @@ async function runGeneric(card, log, preLines) {
   // 名字所在那一行，最沒把握的字機率太低 → 標黃色請核對
   const strip = t => (t || '').replace(/[\s,]/g, '').toUpperCase();
   const lineP = v => { const sv = strip(v); if (!sv) return 0; const ls = lines.filter(L => strip(L.t).includes(sv) || (sv.length > 3 && sv.includes(strip(L.t)) && strip(L.t).length >= 2)); return ls.length ? Math.min(...ls.map(L => L.p ?? 1)) : 0; };
+  // 只檢查「主要欄位」：護照、居留證看英文名＋護照號碼；其他證件看中文名＋身分證號。生日已檢查過格式和合理性，只在沒讀到時標。
   const un = [];
-  for (const k of ['name', 'nameEn', 'birth']) if (TYPES[docType].f[k] && $(k).value && lineP($(k).value.replace(/-/g, '/').split('/')[0] && k === 'birth' ? $(k).value.split(/[-\/]/)[0] : $(k).value) < 0.9) un.push(k);
-  for (const k of Object.keys(TYPES[docType].f)) if (['name','nameEn','birth','idno','ppno'].includes(k) && !$(k).value) un.push(k);
+  const en = EN_FIRST(docType), noK = en ? 'ppno' : 'idno';
+  const nameK = en ? 'nameEn' : (docType === 'nhi' && !$('name').value && $('nameEn').value ? 'nameEn' : 'name');   // 外籍人士的健保卡只有英文名
+  const nm = $(nameK).value;
+  if (!nm) un.push(nameK);
+  else if (docType === 'seaman') { if ((r._nameConf ?? 2) < 2) un.push('name'); }     // 船員證名字是投票讀的：同樣結果至少要讀到兩次
+  else if (lineP(nm) < 0.85) un.push(nameK);
+  if (!$('birth').value || !birthOk(docType, $('birth').value)) un.push('birth');
+  if (!$(noK).value && !(en && $('idno').value)) un.push(noK);
+  else if (!en && $('idno').value && !validId($('idno').value.trim().toUpperCase())) un.push('idno');
   markUnsure(un);
   if (docType === 'passport' && r.mrz) { $('ppCheck').textContent = '✓ MRZ 檢查碼正確'; $('ppCheck').className = 'ok'; }
   $('birthAd').textContent = TYPES[docType].date === 'roc' ? rocToAd($('birth').value) : '';
